@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
 #include <af/dim4.hpp>
 #include <Array.hpp>
 #include <resize.hpp>
@@ -32,6 +31,9 @@ namespace opencl
             case AF_INTERP_BILINEAR:
                 kernel::resize<T, AF_INTERP_BILINEAR>(out, in);
                 break;
+            case AF_INTERP_LOWER:
+                kernel::resize<T, AF_INTERP_LOWER>(out, in);
+                break;
             default:
                 break;
         }
@@ -55,4 +57,6 @@ namespace opencl
     INSTANTIATE(uintl)
     INSTANTIATE(uchar)
     INSTANTIATE(char)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
 }

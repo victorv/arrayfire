@@ -8,13 +8,15 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <set.hpp>
 #include <copy.hpp>
 #include <sort.hpp>
 #include <err_opencl.hpp>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include <boost/compute/algorithm/set_intersection.hpp>
 #include <boost/compute/algorithm/set_union.hpp>
 #include <boost/compute/algorithm/sort.hpp>
@@ -27,6 +29,16 @@ namespace opencl
 {
     using af::dim4;
 
+    using std::conditional;
+    using std::is_same;
+    template<typename T>
+    using ltype_t = typename conditional<is_same<T, intl>::value, cl_long, T>::type;
+
+    template<typename T>
+    using type_t = typename conditional<is_same<T, uintl>::value,
+                                        cl_ulong, ltype_t<T>
+                                       >::type;
+
     template<typename T>
     Array<T> setUnique(const Array<T> &in,
                        const bool is_sorted)
@@ -38,8 +50,8 @@ namespace opencl
 
             compute::buffer out_data((*out.get())());
 
-            compute::buffer_iterator<T> begin(out_data, 0);
-            compute::buffer_iterator<T> end(out_data, out.dims()[0]);
+            compute::buffer_iterator< type_t<T> > begin(out_data, 0);
+            compute::buffer_iterator< type_t<T> > end(out_data, out.elements());
 
             if (!is_sorted) {
                 compute::sort(begin, end, queue);
@@ -69,7 +81,7 @@ namespace opencl
                 unique_second = setUnique(second, false);
             }
 
-            size_t out_size = unique_first.dims()[0] + unique_second.dims()[0];
+            size_t out_size = unique_first.elements() + unique_second.elements();
             Array<T> out = createEmptyArray<T>(dim4(out_size, 1, 1, 1));
 
             compute::command_queue queue(getQueue()());
@@ -78,13 +90,13 @@ namespace opencl
             compute::buffer second_data((*unique_second.get())());
             compute::buffer out_data((*out.get())());
 
-            compute::buffer_iterator<T> first_begin(first_data, 0);
-            compute::buffer_iterator<T> first_end(first_data, unique_first.dims()[0]);
-            compute::buffer_iterator<T> second_begin(second_data, 0);
-            compute::buffer_iterator<T> second_end(second_data, unique_second.dims()[0]);
-            compute::buffer_iterator<T> out_begin(out_data, 0);
+            compute::buffer_iterator< type_t<T> > first_begin(first_data, 0);
+            compute::buffer_iterator< type_t<T> > first_end(first_data, unique_first.elements());
+            compute::buffer_iterator< type_t<T> > second_begin(second_data, 0);
+            compute::buffer_iterator< type_t<T> > second_end(second_data, unique_second.elements());
+            compute::buffer_iterator< type_t<T> > out_begin(out_data, 0);
 
-            compute::buffer_iterator<T> out_end = compute::set_union(
+            compute::buffer_iterator< type_t<T> > out_end = compute::set_union(
                 first_begin, first_end, second_begin, second_end, out_begin, queue
                 );
 
@@ -110,7 +122,7 @@ namespace opencl
                 unique_second = setUnique(second, false);
             }
 
-            size_t out_size = std::max(unique_first.dims()[0], unique_second.dims()[0]);
+            size_t out_size = std::max(unique_first.elements(), unique_second.elements());
             Array<T> out = createEmptyArray<T>(dim4(out_size, 1, 1, 1));
 
             compute::command_queue queue(getQueue()());
@@ -119,13 +131,13 @@ namespace opencl
             compute::buffer second_data((*unique_second.get())());
             compute::buffer out_data((*out.get())());
 
-            compute::buffer_iterator<T> first_begin(first_data, 0);
-            compute::buffer_iterator<T> first_end(first_data, unique_first.dims()[0]);
-            compute::buffer_iterator<T> second_begin(second_data, 0);
-            compute::buffer_iterator<T> second_end(second_data, unique_second.dims()[0]);
-            compute::buffer_iterator<T> out_begin(out_data, 0);
+            compute::buffer_iterator< type_t<T> > first_begin(first_data, 0);
+            compute::buffer_iterator< type_t<T> > first_end(first_data, unique_first.elements());
+            compute::buffer_iterator< type_t<T> > second_begin(second_data, 0);
+            compute::buffer_iterator< type_t<T> > second_end(second_data, unique_second.elements());
+            compute::buffer_iterator< type_t<T> > out_begin(out_data, 0);
 
-            compute::buffer_iterator<T> out_end = compute::set_intersection(
+            compute::buffer_iterator< type_t<T> > out_end = compute::set_intersection(
                 first_begin, first_end, second_begin, second_end, out_begin, queue
                 );
 
@@ -147,4 +159,10 @@ namespace opencl
     INSTANTIATE(uint)
     INSTANTIATE(char)
     INSTANTIATE(uchar)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
+    INSTANTIATE(intl)
+    INSTANTIATE(uintl)
 }
+
+#pragma GCC diagnostic pop

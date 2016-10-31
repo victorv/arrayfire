@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <af/dim4.hpp>
 #include <math.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -18,8 +19,8 @@ namespace cuda
     namespace kernel
     {
         // Kernel Launch Config Values
-        static const unsigned TX = 32;
-        static const unsigned TY = 8;
+        static const unsigned IOTA_TX = 32;
+        static const unsigned IOTA_TY = 8;
         static const unsigned TILEX = 512;
         static const unsigned TILEY = 32;
 
@@ -69,9 +70,9 @@ namespace cuda
         // Wrapper functions
         ///////////////////////////////////////////////////////////////////////////
         template<typename T>
-        void iota(Param<T> out, const dim4 &sdims, const dim4 &tdims)
+        void iota(Param<T> out, const af::dim4 &sdims, const af::dim4 &tdims)
         {
-            dim3 threads(TX, TY, 1);
+            dim3 threads(IOTA_TX, IOTA_TY, 1);
 
             int blocksPerMatX = divup(out.dims[0], TILEX);
             int blocksPerMatY = divup(out.dims[1], TILEY);
@@ -79,8 +80,9 @@ namespace cuda
                         blocksPerMatY * out.dims[3],
                         1);
 
-            iota_kernel<T><<<blocks, threads>>>(out, sdims[0], sdims[1], sdims[2], sdims[3],
-                        tdims[0], tdims[1], tdims[2], tdims[3], blocksPerMatX, blocksPerMatY);
+            CUDA_LAUNCH((iota_kernel<T>), blocks, threads,
+                    out, sdims[0], sdims[1], sdims[2], sdims[3],
+                    tdims[0], tdims[1], tdims[2], tdims[3], blocksPerMatX, blocksPerMatY);
             POST_LAUNCH_CHECK();
         }
     }

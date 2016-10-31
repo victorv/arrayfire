@@ -10,6 +10,7 @@
 #pragma once
 
 #include <defines.hpp>
+#include <types.hpp>
 #include <af/traits.hpp>
 #include <string>
 #include <sstream>
@@ -30,16 +31,6 @@ struct dtype_traits<cl_double2> {
     typedef double base_type;
     static const char* getName() { return "double2"; }
 };
-
-#if !defined(OS_WIN)        // Windows defines size_t as ulong
-template<>
-struct dtype_traits<size_t> {
-    static const char* getName()
-    {
-        return (sizeof(size_t) == 8)  ? "ulong" : "uint";
-    }
-};
-#endif
 
 template<typename T> static bool iscplx() { return false; }
 template<> STATIC_ bool iscplx<cl_float2>() { return true; }

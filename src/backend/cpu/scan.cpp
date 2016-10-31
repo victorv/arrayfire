@@ -9,103 +9,89 @@
 
 #include <complex>
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <scan.hpp>
 #include <ops.hpp>
+#include <platform.hpp>
+#include <queue.hpp>
+#include <kernel/scan.hpp>
 
 using af::dim4;
 
 namespace cpu
 {
-    template<af_op_t op, typename Ti, typename To, int D>
-    struct scan_dim
-    {
-        void operator()(To *out, const dim4 ostrides, const dim4 odims,
-                        const Ti *in , const dim4 istrides, const dim4 idims,
-                        const int dim)
-        {
-            const int D1 = D - 1;
-            for (dim_t i = 0; i < odims[D1]; i++) {
-                scan_dim<op, Ti, To, D1>()(out + i * ostrides[D1],
-                                           ostrides, odims,
-                                           in  + i * istrides[D1],
-                                           istrides, idims,
-                                           dim);
-                if (D1 == dim) break;
-            }
-        }
-    };
 
     template<af_op_t op, typename Ti, typename To>
-    struct scan_dim<op, Ti, To, 0>
+    Array<To> scan(const Array<Ti>& in, const int dim, bool inclusive_scan)
     {
-        void operator()(To *out, const dim4 ostrides, const dim4 odims,
-                        const Ti *in , const dim4 istrides, const dim4 idims,
-                        const int dim)
-        {
+        dim4 dims     = in.dims();
+        Array<To> out = createEmptyArray<To>(dims);
+        in.eval();
 
-            dim_t istride = istrides[dim];
-            dim_t ostride = ostrides[dim];
-
-            Transform<Ti, To, op> transform;
-            // FIXME: Change the name to something better
-            Binary<To, op> scan;
-
-            To out_val = scan.init();
-            for (dim_t i = 0; i < idims[dim]; i++) {
-                To in_val = transform(in[i * istride]);
-                out_val = scan(in_val, out_val);
-                out[i * ostride] = out_val;
+        if (inclusive_scan) {
+            switch (in.ndims()) {
+                case 1:
+                    kernel::scan_dim<op, Ti, To, 1, true> func1;
+                    getQueue().enqueue(func1, out, 0, in, 0, dim);
+                    break;
+                case 2:
+                    kernel::scan_dim<op, Ti, To, 2, true> func2;
+                    getQueue().enqueue(func2, out, 0, in, 0, dim);
+                    break;
+                case 3:
+                    kernel::scan_dim<op, Ti, To, 3, true> func3;
+                    getQueue().enqueue(func3, out, 0, in, 0, dim);
+                    break;
+                case 4:
+                    kernel::scan_dim<op, Ti, To, 4, true> func4;
+                    getQueue().enqueue(func4, out, 0, in, 0, dim);
+                    break;
             }
-        }
-    };
-
-    template<af_op_t op, typename Ti, typename To>
-    Array<To> scan(const Array<Ti>& in, const int dim)
-    {
-        dim4 dims = in.dims();
-
-        Array<To> out = createValueArray<To>(dims, 0);
-
-        switch (in.ndims()) {
-        case 1:
-            scan_dim<op, Ti, To, 1>()(out.get(), out.strides(), out.dims(),
-                                      in.get(), in.strides(), in.dims(), dim);
-            break;
-
-        case 2:
-            scan_dim<op, Ti, To, 2>()(out.get(), out.strides(), out.dims(),
-                                      in.get(), in.strides(), in.dims(), dim);
-            break;
-
-        case 3:
-            scan_dim<op, Ti, To, 3>()(out.get(), out.strides(), out.dims(),
-                                      in.get(), in.strides(), in.dims(), dim);
-            break;
-
-        case 4:
-            scan_dim<op, Ti, To, 4>()(out.get(), out.strides(), out.dims(),
-                                      in.get(), in.strides(), in.dims(), dim);
-            break;
+        } else {
+            switch (in.ndims()) {
+                case 1:
+                    kernel::scan_dim<op, Ti, To, 1, false> func1;
+                    getQueue().enqueue(func1, out, 0, in, 0, dim);
+                    break;
+                case 2:
+                    kernel::scan_dim<op, Ti, To, 2, false> func2;
+                    getQueue().enqueue(func2, out, 0, in, 0, dim);
+                    break;
+                case 3:
+                    kernel::scan_dim<op, Ti, To, 3, false> func3;
+                    getQueue().enqueue(func3, out, 0, in, 0, dim);
+                    break;
+                case 4:
+                    kernel::scan_dim<op, Ti, To, 4, false> func4;
+                    getQueue().enqueue(func4, out, 0, in, 0, dim);
+                    break;
+            }
         }
 
         return out;
     }
 
-#define INSTANTIATE(ROp, Ti, To)                                        \
-    template Array<To> scan<ROp, Ti, To>(const Array<Ti> &in, const int dim); \
+#define INSTANTIATE_SCAN(ROp, Ti, To)\
+    template Array<To> scan<ROp, Ti, To>(const Array<Ti> &in, const int dim, bool inclusive_scan);
 
-    //accum
-    INSTANTIATE(af_add_t, float  , float  )
-    INSTANTIATE(af_add_t, double , double )
-    INSTANTIATE(af_add_t, cfloat , cfloat )
-    INSTANTIATE(af_add_t, cdouble, cdouble)
-    INSTANTIATE(af_add_t, int    , int    )
-    INSTANTIATE(af_add_t, uint   , uint   )
-    INSTANTIATE(af_add_t, char   , int    )
-    INSTANTIATE(af_add_t, uchar  , uint   )
-    INSTANTIATE(af_notzero_t, char  , uint   )
+#define INSTANTIATE_SCAN_ALL(ROp)                       \
+    INSTANTIATE_SCAN(ROp, float  , float  )             \
+    INSTANTIATE_SCAN(ROp, double , double )             \
+    INSTANTIATE_SCAN(ROp, cfloat , cfloat )             \
+    INSTANTIATE_SCAN(ROp, cdouble, cdouble)             \
+    INSTANTIATE_SCAN(ROp, int    , int    )             \
+    INSTANTIATE_SCAN(ROp, uint   , uint   )             \
+    INSTANTIATE_SCAN(ROp, intl   , intl   )             \
+    INSTANTIATE_SCAN(ROp, uintl  , uintl  )             \
+    INSTANTIATE_SCAN(ROp, char   , int    )             \
+    INSTANTIATE_SCAN(ROp, char   , uint   )             \
+    INSTANTIATE_SCAN(ROp, uchar  , uint   )             \
+    INSTANTIATE_SCAN(ROp, short  , int    )             \
+    INSTANTIATE_SCAN(ROp, ushort , uint   )
 
+    INSTANTIATE_SCAN(af_notzero_t, char, uint)
+    INSTANTIATE_SCAN_ALL(af_add_t)
+    INSTANTIATE_SCAN_ALL(af_mul_t)
+    INSTANTIATE_SCAN_ALL(af_min_t)
+    INSTANTIATE_SCAN_ALL(af_max_t)
 }

@@ -8,6 +8,7 @@
  ********************************************************/
 
 #define sign(in) signbit((in))
+#define __noop(a) (a)
 #define __add(lhs, rhs) (lhs) + (rhs)
 #define __sub(lhs, rhs) (lhs) - (rhs)
 #define __mul(lhs, rhs) (lhs) * (rhs)
@@ -37,6 +38,7 @@
 #define __cimag(in) ((in).y)
 #define __cabs2(in) ((in).x * (in).x + (in).y * (in).y)
 #define __cabs(in) sqrt(__cabs2(in))
+#define __sigmoid(in) (1.0/(1 + exp(-(in))))
 
 float2 __cconjf(float2 in)
 {

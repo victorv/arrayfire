@@ -26,7 +26,7 @@
 using cl::Buffer;
 using cl::Program;
 using cl::Kernel;
-using cl::make_kernel;
+using cl::KernelFunctor;
 using cl::EnqueueArgs;
 using cl::NDRange;
 using std::string;
@@ -50,11 +50,11 @@ namespace kernel
 
         std::call_once(compileFlags[device], [device] () {
 
-                ToNum<T> toNum;
+                ToNumStr<T> toNumStr;
 
                 std::ostringstream options;
                 options << " -D T=" << dtype_traits<T>::getName()
-                        << " -D zero=" << toNum(scalar<T>(0))
+                        << " -D zero=" << toNumStr(scalar<T>(0))
                         << " -D CPLX=" << af::iscplx<T>();
                 if (std::is_same<T, double>::value ||
                     std::is_same<T, cdouble>::value) {
@@ -72,7 +72,7 @@ namespace kernel
 
         uint lim = divup(otmp.info.dims[0], (threads_x * groups_x));
 
-        auto whereOp = make_kernel<Buffer,
+        auto whereOp = KernelFunctor<Buffer,
                                    Buffer, KParam,
                                    Buffer, KParam,
                                    Buffer, KParam,
@@ -126,9 +126,10 @@ namespace kernel
             int otmp_elements = otmp.info.strides[3] * otmp.info.dims[3];
             otmp.data = bufferAlloc(otmp_elements * sizeof(uint));
 
-            scan_first_fn<T, uint, af_notzero_t, false>(otmp, rtmp, in,
-                                                        groups_x, groups_y,
-                                                        threads_x);
+            scan_first_launcher<T, uint, af_notzero_t>(otmp, rtmp, in,
+                                                       false,
+                                                       groups_x, groups_y,
+                                                       threads_x);
 
             // Linearize the dimensions and perform scan
             Param ltmp = rtmp;
@@ -158,7 +159,9 @@ namespace kernel
                 out.info.strides[k] = total;
             }
 
-            get_out_idx<T>(out.data, otmp, rtmp, in, threads_x, groups_x, groups_y);
+            if (total > 0) {
+                get_out_idx<T>(out.data, otmp, rtmp, in, threads_x, groups_x, groups_y);
+            }
 
             bufferFree(rtmp.data);
             bufferFree(otmp.data);

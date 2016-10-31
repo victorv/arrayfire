@@ -7,16 +7,15 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <dispatch.hpp>
 #include <err_cuda.hpp>
 #include <debug_cuda.hpp>
 #include <memory.hpp>
 
-#include <convolve_common.hpp>
 #include "convolve.hpp"
 #include "orb_patch.hpp"
-#include "sort_index.hpp"
+#include "sort_by_key.hpp"
+#include "range.hpp"
 
 #include <boost/scoped_ptr.hpp>
 
@@ -115,6 +114,9 @@ __global__ void harris_response(
 {
     unsigned f = blockDim.x * blockIdx.x + threadIdx.x;
 
+    float ixx = 0.f, iyy = 0.f, ixy = 0.f;
+    float size = 0.f;
+
     if (f < total_feat) {
         unsigned x, y;
         float scl = 1.f;
@@ -130,7 +132,7 @@ __global__ void harris_response(
         }
 
         // Round feature size to nearest odd integer
-        float size = 2.f * floor((patch_size * scl) / 2.f) + 1.f;
+        size = 2.f * floor((patch_size * scl) / 2.f) + 1.f;
 
         // Avoid keeping features that might be too wide and might not fit on
         // the image, sqrt(2.f) is the radius when angle is 45 degrees and
@@ -141,7 +143,6 @@ __global__ void harris_response(
 
         unsigned r = block_size / 2;
 
-        float ixx = 0.f, iyy = 0.f, ixy = 0.f;
         unsigned block_size_sq = block_size * block_size;
         for (unsigned k = threadIdx.y; k < block_size_sq; k += blockDim.y) {
             int i = k / block_size - r;
@@ -156,28 +157,28 @@ __global__ void harris_response(
             iyy += iy*iy;
             ixy += ix*iy;
         }
-        __syncthreads();
+    }
+    __syncthreads();
 
-        ixx = block_reduce_sum(ixx);
-        iyy = block_reduce_sum(iyy);
-        ixy = block_reduce_sum(ixy);
+    ixx = block_reduce_sum(ixx);
+    iyy = block_reduce_sum(iyy);
+    ixy = block_reduce_sum(ixy);
 
-        if (threadIdx.y == 0) {
-            float tr = ixx + iyy;
-            float det = ixx*iyy - ixy*ixy;
+    if (f < total_feat && threadIdx.y == 0) {
+        float tr = ixx + iyy;
+        float det = ixx*iyy - ixy*ixy;
 
-            // Calculate Harris responses
-            float resp = det - k_thr * (tr*tr);
+        // Calculate Harris responses
+        float resp = det - k_thr * (tr*tr);
 
-            // Scale factor
-            // TODO: improve response scaling
-            float rscale = 0.001f;
-            rscale = rscale * rscale * rscale * rscale;
+        // Scale factor
+        // TODO: improve response scaling
+        float rscale = 0.001f;
+        rscale = rscale * rscale * rscale * rscale;
 
-            score_out[f] = resp * rscale;
-            if (use_scl)
-                size_out[f] = size;
-        }
+        score_out[f] = resp * rscale;
+        if (use_scl)
+            size_out[f] = size;
     }
 }
 
@@ -328,7 +329,8 @@ void orb(unsigned* out_feat,
 
     // In future implementations, the user will be capable of passing his
     // distribution instead of using the reference one
-    //CUDA_CHECK(cudaMemcpyToSymbol(d_ref_pat, h_ref_pat, 256 * 4 * sizeof(int), 0, cudaMemcpyHostToDevice));
+    //CUDA_CHECK(cudaMemcpyToSymbolAsync(d_ref_pat, h_ref_pat, 256 * 4 * sizeof(int), 0,
+    // cudaMemcpyHostToDevice, cuda::getStream(cuda::getActiveDeviceId())));
 
     vector<float*> d_score_pyr(max_levels);
     vector<float*> d_ori_pyr(max_levels);
@@ -354,7 +356,9 @@ void orb(unsigned* out_feat,
 
         int gauss_elem = gauss_filter.strides[3] * gauss_filter.dims[3];
         gauss_filter.ptr = memAlloc<convAccT>(gauss_elem);
-        CUDA_CHECK(cudaMemcpy(gauss_filter.ptr, h_gauss.get(), gauss_elem * sizeof(convAccT), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(gauss_filter.ptr, h_gauss.get(), gauss_elem * sizeof(convAccT),
+                    cudaMemcpyHostToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
     }
 
     for (int i = 0; i < (int)max_levels; i++) {
@@ -370,10 +374,8 @@ void orb(unsigned* out_feat,
         // Good block_size >= 7 (must be an odd number)
         dim3 threads(THREADS_X, THREADS_Y);
         dim3 blocks(divup(feat_pyr[i], threads.x), 1);
-        harris_response<T,false><<<blocks, threads>>>(d_score_harris, NULL,
-                                                      d_x_pyr[i], d_y_pyr[i], NULL,
-                                                      feat_pyr[i],
-                                                      img_pyr[i], 7, 0.04f, patch_size);
+        CUDA_LAUNCH((harris_response<T,false>), blocks, threads,
+               d_score_harris, NULL, d_x_pyr[i], d_y_pyr[i], NULL, feat_pyr[i], img_pyr[i], 7, 0.04f, patch_size);
         POST_LAUNCH_CHECK();
 
         Param<float> harris_sorted;
@@ -391,10 +393,12 @@ void orb(unsigned* out_feat,
 
         int sort_elem = harris_sorted.strides[3] * harris_sorted.dims[3];
         harris_sorted.ptr = d_score_harris;
+        // Create indices using range
         harris_idx.ptr = memAlloc<unsigned>(sort_elem);
+        kernel::range<uint>(harris_idx, 0);
 
         // Sort features according to Harris responses
-        sort0_index<float, false>(harris_sorted, harris_idx);
+        kernel::sort0ByKey<float, uint>(harris_sorted, harris_idx, false);
 
         feat_pyr[i] = std::min(feat_pyr[i], lvl_best[i]);
 
@@ -405,9 +409,9 @@ void orb(unsigned* out_feat,
         // Keep only features with higher Harris responses
         threads = dim3(THREADS, 1);
         blocks = dim3(divup(feat_pyr[i], threads.x), 1);
-        keep_features<T><<<blocks, threads>>>(d_x_lvl, d_y_lvl, d_score_lvl, NULL,
-                                              d_x_pyr[i], d_y_pyr[i], harris_sorted.ptr, harris_idx.ptr,
-                                              NULL, feat_pyr[i]);
+        CUDA_LAUNCH((keep_features<T>), blocks, threads,
+                d_x_lvl, d_y_lvl, d_score_lvl, NULL,
+                d_x_pyr[i], d_y_pyr[i], harris_sorted.ptr, harris_idx.ptr, NULL, feat_pyr[i]);
         POST_LAUNCH_CHECK();
 
         memFree(d_x_pyr[i]);
@@ -420,8 +424,8 @@ void orb(unsigned* out_feat,
         // Compute orientation of features
         threads = dim3(THREADS_X, THREADS_Y);
         blocks  = dim3(divup(feat_pyr[i], threads.x), 1);
-        centroid_angle<T><<<blocks, threads>>>(d_x_lvl, d_y_lvl, d_ori_lvl, feat_pyr[i],
-                                               img_pyr[i], patch_size);
+        CUDA_LAUNCH((centroid_angle<T>), blocks, threads,
+                d_x_lvl, d_y_lvl, d_ori_lvl, feat_pyr[i], img_pyr[i], patch_size);
         POST_LAUNCH_CHECK();
 
         Param<T> lvl_tmp;
@@ -457,14 +461,15 @@ void orb(unsigned* out_feat,
         float* d_size_lvl = memAlloc<float>(feat_pyr[i]);
 
         unsigned* d_desc_lvl = memAlloc<unsigned>(feat_pyr[i] * 8);
-        CUDA_CHECK(cudaMemset(d_desc_lvl, 0, feat_pyr[i] * 8 * sizeof(unsigned)));
+        CUDA_CHECK(cudaMemsetAsync(d_desc_lvl, 0, feat_pyr[i] * 8 * sizeof(unsigned),
+                    cuda::getStream(cuda::getActiveDeviceId())));
 
         // Compute ORB descriptors
         threads = dim3(THREADS_X, THREADS_Y);
         blocks  = dim3(divup(feat_pyr[i], threads.x), 1);
-        extract_orb<T><<<blocks, threads>>>(d_desc_lvl, feat_pyr[i],
-                                            d_x_lvl, d_y_lvl, d_ori_lvl, d_size_lvl,
-                                            img_pyr[i], lvl_scl[i], patch_size);
+        CUDA_LAUNCH((extract_orb<T>), blocks, threads,
+                d_desc_lvl, feat_pyr[i], d_x_lvl, d_y_lvl, d_ori_lvl, d_size_lvl,
+                img_pyr[i], lvl_scl[i], patch_size);
         POST_LAUNCH_CHECK();
 
         if (i > 0)
@@ -504,13 +509,18 @@ void orb(unsigned* out_feat,
         if (i > 0)
             offset += feat_pyr[i-1];
 
-        CUDA_CHECK(cudaMemcpy(*d_x+offset, d_x_pyr[i], feat_pyr[i] * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*d_y+offset, d_y_pyr[i], feat_pyr[i] * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*d_score+offset, d_score_pyr[i], feat_pyr[i] * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*d_ori+offset, d_ori_pyr[i], feat_pyr[i] * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*d_size+offset, d_size_pyr[i], feat_pyr[i] * sizeof(float), cudaMemcpyDeviceToDevice));
-
-        CUDA_CHECK(cudaMemcpy(*d_desc+(offset*8), d_desc_pyr[i], feat_pyr[i] * 8 * sizeof(unsigned), cudaMemcpyDeviceToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(*d_x+offset, d_x_pyr[i], feat_pyr[i] * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*d_y+offset, d_y_pyr[i], feat_pyr[i] * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*d_score+offset, d_score_pyr[i], feat_pyr[i] * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*d_ori+offset, d_ori_pyr[i], feat_pyr[i] * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*d_size+offset, d_size_pyr[i], feat_pyr[i] * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*d_desc+(offset*8), d_desc_pyr[i], feat_pyr[i] * 8 * sizeof(unsigned),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
 
         memFree(d_x_pyr[i]);
         memFree(d_y_pyr[i]);

@@ -7,10 +7,16 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
+
 #include <string>
 
 namespace cpu {
-    std::string getInfo();
+    class queue;
+
+    int getBackend();
+
+    std::string getDeviceInfo();
 
     bool isDoubleSupported(int device);
 
@@ -22,5 +28,15 @@ namespace cpu {
 
     int getActiveDeviceId();
 
+    size_t getDeviceMemorySize(int device);
+
+    size_t getHostMemorySize();
+
     void sync(int device);
+
+    queue& getQueue(int idx = 0);
+
+    unsigned getMaxJitSize();
+
+    bool& evalFlag();
 }

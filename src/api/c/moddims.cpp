@@ -23,22 +23,39 @@ template<typename T>
 Array<T> modDims(const Array<T>& in, const af::dim4 &newDims)
 {
     //FIXME: Figure out a better way
-    evalArray<T>(in);
+    in.eval();
 
     Array<T> Out = in;
 
-    if (!in.isOwner()) {
+    if (!in.isLinear()) {
         Out = copyArray<T>(in);
     }
-    Out.modDims(newDims);
+
+    Out.setDataDims(newDims);
 
     return Out;
 }
+
+template Array<float> modDims(const Array<float> &in, const af::dim4 &newDims);
+template Array<double> modDims(const Array<double> &in, const af::dim4 &newDims);
+template Array<cfloat> modDims(const Array<cfloat> &in, const af::dim4 &newDims);
+template Array<cdouble> modDims(const Array<cdouble> &in, const af::dim4 &newDims);
+template Array<int> modDims(const Array<int> &in, const af::dim4 &newDims);
+template Array<uint> modDims(const Array<uint> &in, const af::dim4 &newDims);
+template Array<intl> modDims(const Array<intl> &in, const af::dim4 &newDims);
+template Array<uintl> modDims(const Array<uintl> &in, const af::dim4 &newDims);
+template Array<short> modDims(const Array<short> &in, const af::dim4 &newDims);
+template Array<ushort> modDims(const Array<ushort> &in, const af::dim4 &newDims);
+template Array<uchar> modDims(const Array<uchar> &in, const af::dim4 &newDims);
+template Array<char> modDims(const Array<char> &in, const af::dim4 &newDims);
 
 af_err af_moddims(af_array *out, const af_array in,
                   const unsigned ndims, const dim_t * const dims)
 {
     try {
+        if(ndims == 0) {
+            return af_retain_array(out, in);
+        }
         ARG_ASSERT(2, ndims >= 1);
         ARG_ASSERT(3, dims != NULL);
 
@@ -63,6 +80,8 @@ af_err af_moddims(af_array *out, const af_array in,
         case u8:  output = getHandle(modDims<uchar  >(getArray<uchar  >(in), newDims)); break;
         case s64: output = getHandle(modDims<intl   >(getArray<intl   >(in), newDims)); break;
         case u64: output = getHandle(modDims<uintl  >(getArray<uintl  >(in), newDims)); break;
+        case s16: output = getHandle(modDims<short  >(getArray<short  >(in), newDims)); break;
+        case u16: output = getHandle(modDims<ushort >(getArray<ushort >(in), newDims)); break;
         default: TYPE_ERROR(1, type);
         }
         std::swap(*out,output);

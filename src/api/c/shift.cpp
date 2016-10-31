@@ -29,6 +29,9 @@ af_err af_shift(af_array *out, const af_array in, const int sdims[4])
         ArrayInfo info = getInfo(in);
         af_dtype type = info.getType();
 
+        if(info.ndims() == 0) {
+            return af_retain_array(out, in);
+        }
         DIM_ASSERT(1, info.elements() > 0);
 
         af_array output;
@@ -41,6 +44,10 @@ af_err af_shift(af_array *out, const af_array in, const int sdims[4])
             case b8:  output = shift<char   >(in, sdims);  break;
             case s32: output = shift<int    >(in, sdims);  break;
             case u32: output = shift<uint   >(in, sdims);  break;
+            case s64: output = shift<intl   >(in, sdims);  break;
+            case u64: output = shift<uintl  >(in, sdims);  break;
+            case s16: output = shift<short  >(in, sdims);  break;
+            case u16: output = shift<ushort >(in, sdims);  break;
             case u8:  output = shift<uchar  >(in, sdims);  break;
             default:  TYPE_ERROR(1, type);
         }

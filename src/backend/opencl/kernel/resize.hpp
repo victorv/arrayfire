@@ -21,7 +21,7 @@
 using cl::Buffer;
 using cl::Program;
 using cl::Kernel;
-using cl::make_kernel;
+using cl::KernelFunctor;
 using cl::EnqueueArgs;
 using cl::NDRange;
 using std::string;
@@ -62,8 +62,9 @@ namespace opencl
                     options << " -D WT="       << dtype_traits<wtype_t<BT>>::getName();
 
                     switch(method) {
-                        case AF_INTERP_NEAREST:  options <<" -D INTERP=NEAREST" ;  break;
+                        case AF_INTERP_NEAREST:  options <<" -D INTERP=NEAREST" ; break;
                         case AF_INTERP_BILINEAR: options <<" -D INTERP=BILINEAR"; break;
+                        case AF_INTERP_LOWER:    options <<" -D INTERP=LOWER"   ; break;
                         default: break;
                     }
 
@@ -86,7 +87,7 @@ namespace opencl
                     resizeKernels[device] = new Kernel(*resizeProgs[device], "resize_kernel");
                 });
 
-                auto resizeOp = make_kernel<Buffer, const KParam,
+                auto resizeOp = KernelFunctor<Buffer, const KParam,
                                       const Buffer, const KParam,
                                       const int, const int, const float, const float>
                                       (*resizeKernels[device]);

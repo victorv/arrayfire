@@ -8,8 +8,11 @@
  ********************************************************/
 
 #include <af/version.h>
+#include <af/cuda.h>
 #include <platform.hpp>
 #include <defines.hpp>
+#include <util.hpp>
+#include <version.hpp>
 #include <driver.h>
 #include <vector>
 #include <string>
@@ -19,6 +22,8 @@
 #include <cstdio>
 #include <cstring>
 #include <err_cuda.hpp>
+#include <util.hpp>
+#include <host_memory.hpp>
 
 using namespace std;
 
@@ -42,8 +47,15 @@ static inline int compute2cores(int major, int minor)
         { 0x20, 32 },
         { 0x21, 48 },
         { 0x30, 192 },
+        { 0x32, 192 },
         { 0x35, 192 },
+        { 0x37, 192 },
         { 0x50, 128 },
+        { 0x52, 128 },
+        { 0x53, 128 },
+        { 0x60, 128 },
+        { 0x61, 64  },
+        { 0x62, 128 },
         {   -1, -1  },
     };
 
@@ -54,13 +66,13 @@ static inline int compute2cores(int major, int minor)
     return 0;
 }
 
-// compare two cards based on (in order):
-//   1. flops (theoretical)
-//   2. total memory
-
+// Return true if greater, false if lesser.
+// if equal, it continues to next comparison
 #define COMPARE(a,b,f) do {                     \
-        return ((a)->f >= (b)->f);              \
-    } while (0);
+        if ((a)->f > (b)->f) return true;       \
+        if ((a)->f < (b)->f) return false;      \
+        break;                                  \
+    } while (0)
 
 
 static inline bool card_compare_compute(const cudaDevice_t &l, const cudaDevice_t &r)
@@ -73,7 +85,7 @@ static inline bool card_compare_compute(const cudaDevice_t &l, const cudaDevice_
     COMPARE(lc, rc, flops);
     COMPARE(lc, rc, prop.totalGlobalMem);
     COMPARE(lc, rc, nativeId);
-    return 0;
+    return false;
 }
 
 static inline bool card_compare_flops(const cudaDevice_t &l, const cudaDevice_t &r)
@@ -86,7 +98,7 @@ static inline bool card_compare_flops(const cudaDevice_t &l, const cudaDevice_t 
     COMPARE(lc, rc, prop.major);
     COMPARE(lc, rc, prop.minor);
     COMPARE(lc, rc, nativeId);
-    return 0;
+    return false;
 }
 
 static inline bool card_compare_mem(const cudaDevice_t &l, const cudaDevice_t &r)
@@ -99,7 +111,7 @@ static inline bool card_compare_mem(const cudaDevice_t &l, const cudaDevice_t &r
     COMPARE(lc, rc, prop.major);
     COMPARE(lc, rc, prop.minor);
     COMPARE(lc, rc, nativeId);
-    return 0;
+    return false;
 }
 
 static inline bool card_compare_num(const cudaDevice_t &l, const cudaDevice_t &r)
@@ -108,18 +120,14 @@ static inline bool card_compare_num(const cudaDevice_t &l, const cudaDevice_t &r
     const cudaDevice_t *rc = &r;
 
     COMPARE(lc, rc, nativeId);
-    return 0;
+    return false;
 }
 
-static const char *get_system(void)
+static const std::string get_system(void)
 {
-    return
-#if defined(ARCH_32)
-    "32-bit "
-#elif defined(ARCH_64)
-    "64-bit "
-#endif
+    std::string arch = (sizeof(void *) == 4) ? "32-bit " : "64-bit ";
 
+    return arch +
 #if defined(OS_LNX)
     "Linux";
 #elif defined(OS_WIN)
@@ -140,16 +148,9 @@ static inline string toString(T val)
 ///////////////////////////////////////////////////////////////////////////
 // Wrapper Functions
 ///////////////////////////////////////////////////////////////////////////
-string getInfo()
+int getBackend()
 {
-    ostringstream info;
-    info << "ArrayFire v" << AF_VERSION
-         << " (CUDA, " << get_system() << ", build " << AF_REVISION << ")" << std::endl;
-    info << getPlatformInfo();
-    for (int i = 0; i < getDeviceCount(); ++i) {
-        info << getDeviceInfo(i);
-    }
-    return info.str();
+    return AF_BACKEND_CUDA;
 }
 
 string getDeviceInfo(int device)
@@ -174,6 +175,18 @@ string getDeviceInfo(int device)
               memory + string(", ") +
              compute + string("\n");
     return info;
+}
+
+string getDeviceInfo()
+{
+    ostringstream info;
+    info << "ArrayFire v" << AF_VERSION
+         << " (CUDA, " << get_system() << ", build " << AF_REVISION << ")" << std::endl;
+    info << getPlatformInfo();
+    for (int i = 0; i < getDeviceCount(); ++i) {
+        info << getDeviceInfo(i);
+    }
+    return info.str();
 }
 
 string getPlatformInfo()
@@ -204,7 +217,7 @@ void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute)
     cudaDeviceProp dev = getDeviceProp(getActiveDeviceId());
 
     // Name
-    snprintf(d_name, 32, "%s", dev.name);
+    snprintf(d_name, 64, "%s", dev.name);
 
     //Platform
     std::string cudaRuntime = getCUDARuntimeVersion();
@@ -215,7 +228,7 @@ void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute)
     snprintf(d_compute, 10, "%d.%d", dev.major, dev.minor);
 
     // Sanitize input
-    for (int i = 0; i < 31; i++) {
+    for (int i = 0; i < 63; i++) {
         if (d_name[i] == ' ') {
             if (d_name[i + 1] == 0 || d_name[i + 1] == ' ') d_name[i] = 0;
             else d_name[i] = '_';
@@ -228,7 +241,8 @@ string getDriverVersion()
     char driverVersion[1024] = {" ",};
     int x = nvDriverVersion(driverVersion, sizeof(driverVersion));
     if (x != 1) {
-        #if !defined(OS_MAC) && !defined(__arm__)  // HACK Mac OSX 10.7 needs new method for fetching driver
+        // Windows, OSX, Tegra Need a new way to fetch driver
+        #if !defined(OS_WIN) && !defined(OS_MAC) && !defined(__arm__) && !defined(__aarch64__)
         throw runtime_error("Invalid driver");
         #endif
         int driver = 0;
@@ -250,6 +264,23 @@ string getCUDARuntimeVersion()
 
 }
 
+unsigned getMaxJitSize()
+{
+    const int MAX_JIT_LEN = 100;
+
+    static int length = 0;
+    if (length == 0) {
+        std::string env_var = getEnvVar("AF_CUDA_MAX_JIT_LEN");
+        if (!env_var.empty()) {
+            length = std::stoi(env_var);
+        } else {
+            length = MAX_JIT_LEN;
+        }
+    }
+
+    return length;
+}
+
 int getDeviceCount()
 {
     return DeviceManager::getInstance().nDevices;
@@ -265,6 +296,43 @@ int getDeviceNativeId(int device)
     if(device < (int)DeviceManager::getInstance().cuDevices.size())
         return DeviceManager::getInstance().cuDevices[device].nativeId;
     return -1;
+}
+
+int getDeviceIdFromNativeId(int nativeId)
+{
+    DeviceManager& mngr = DeviceManager::getInstance();
+
+    int devId = 0;
+    for(devId = 0; devId < mngr.nDevices; ++devId) {
+        if (nativeId == mngr.cuDevices[devId].nativeId)
+            break;
+    }
+    return devId;
+}
+
+cudaStream_t getStream(int device)
+{
+    cudaStream_t str = DeviceManager::getInstance().streams[device];
+    // if the stream has not yet been initialized, ie. the device has not been
+    // set to active at least once (cuz that's where the stream is created)
+    // then set the device, get the stream, reset the device to current
+    if(!str) {
+        int active_dev = DeviceManager::getInstance().activeDev;
+        setDevice(device);
+        str = DeviceManager::getInstance().streams[device];
+        setDevice(active_dev);
+    }
+    return str;
+}
+
+size_t getDeviceMemorySize(int device)
+{
+    return getDeviceProp(device).totalGlobalMem;
+}
+
+size_t getHostMemorySize()
+{
+    return common::getHostMemorySize();
 }
 
 int setDevice(int device)
@@ -307,8 +375,13 @@ DeviceManager::DeviceManager()
 
     sortDevices();
 
-    const char* deviceENV = getenv("AF_CUDA_DEFAULT_DEVICE");
-    if(!deviceENV) {
+    // Initialize all streams to 0.
+    // Streams will be created in setActiveDevice()
+    for(int i = 0; i < (int)MAX_DEVICES; i++)
+        streams[i] = (cudaStream_t)0;
+
+    std::string deviceENV = getEnvVar("AF_CUDA_DEFAULT_DEVICE");
+    if(deviceENV.empty()) {
         setActiveDevice(0, cuDevices[0].nativeId);
     } else {
         stringstream s(deviceENV);
@@ -328,39 +401,124 @@ void DeviceManager::sortDevices(sort_mode mode)
 {
     switch(mode) {
         case memory :
-            sort(cuDevices.begin(), cuDevices.end(), card_compare_mem);
+            std::stable_sort(cuDevices.begin(), cuDevices.end(), card_compare_mem);
             break;
         case flops :
-            sort(cuDevices.begin(), cuDevices.end(), card_compare_flops);
+            std::stable_sort(cuDevices.begin(), cuDevices.end(), card_compare_flops);
             break;
         case compute :
-            sort(cuDevices.begin(), cuDevices.end(), card_compare_compute);
+            std::stable_sort(cuDevices.begin(), cuDevices.end(), card_compare_compute);
             break;
         case none : default :
-            sort(cuDevices.begin(), cuDevices.end(), card_compare_num);
+            std::stable_sort(cuDevices.begin(), cuDevices.end(), card_compare_num);
             break;
     }
 }
 
 int DeviceManager::setActiveDevice(int device, int nId)
 {
-    if(device > (int)cuDevices.size()) {
-        return -1;
-    } else {
-        int old = activeDev;
-        if(nId == -1) nId = getDeviceNativeId(device);
-        CUDA_CHECK(cudaSetDevice(nId));
-        activeDev = device;
+    static bool first = true;
+
+    int numDevices = cuDevices.size();
+
+    if(device > numDevices) return -1;
+
+    int old = activeDev;
+    if(nId == -1) nId = getDeviceNativeId(device);
+    CUDA_CHECK(cudaSetDevice(nId));
+
+    cudaError_t err = cudaSuccess;
+    if(!streams[device])
+        err = cudaStreamCreate(&streams[device]);
+
+    activeDev = device;
+
+    if (err == cudaSuccess) return old;
+
+    // Comes when user sets device
+    // If success, return. Else throw error
+    if (!first) {
+        CUDA_CHECK(err);
         return old;
     }
+
+    // Comes only when first is true. Set it to false
+    first = false;
+
+    while(true) {
+        // Check for errors other than DevicesUnavailable
+        // If success, return. Else throw error
+        // If DevicesUnavailable, try other devices (while loop below)
+        if (err != cudaErrorDevicesUnavailable) {
+            CUDA_CHECK(err);
+            activeDev = device;
+            return old;
+        }
+        cudaGetLastError(); // Reset error stack
+#ifndef NDEBUG
+        printf("Warning: Device %d is unavailable. Incrementing to next device \n", device);
+#endif
+
+        // Comes here is the device is in exclusive mode or
+        // otherwise fails streamCreate with this error.
+        // All other errors will error out
+        device++;
+        if (device >= numDevices) break;
+
+        // Can't call getNativeId here as it will cause an infinite loop with the constructor
+        nId = cuDevices[device].nativeId;
+
+        CUDA_CHECK(cudaSetDevice(nId));
+        err = cudaStreamCreate(&streams[device]);
+    }
+
+    // If all devices fail with DevicesUnavailable, then throw this error
+    CUDA_CHECK(err);
+
+    return old;
 }
 
 void sync(int device)
 {
     int currDevice = getActiveDeviceId();
     setDevice(device);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaStreamSynchronize(getStream(getActiveDeviceId())));
     setDevice(currDevice);
 }
 
+bool synchronize_calls() {
+    static bool sync = getEnvVar("AF_SYNCHRONOUS_CALLS") == "1";
+    return sync;
+}
+
+bool& evalFlag()
+{
+    static bool flag = true;
+    return flag;
+}
+
+}
+
+af_err afcu_get_stream(cudaStream_t* stream, int id)
+{
+    try{
+        *stream = cuda::getStream(id);
+    } CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err afcu_get_native_id(int* nativeid, int id)
+{
+    try {
+        *nativeid = cuda::getDeviceNativeId(id);
+    } CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err afcu_set_native_id(int nativeid)
+{
+    try {
+        cuda::setDevice(cuda::getDeviceIdFromNativeId(nativeid));
+    } CATCHALL;
+    return AF_SUCCESS;
 }

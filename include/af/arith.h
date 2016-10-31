@@ -47,6 +47,35 @@ namespace af
     AFAPI array max    (const double lhs, const array &rhs);
     /// @}
 
+#if AF_API_VERSION >= 34
+    /// \ingroup arith_func_clamp
+    /// @{
+    /// C++ Interface for clamping an array between two values
+    ///
+    /// \param[in] in Input array
+    /// \param[in] lo Value for lower limit
+    /// \param[in] hi  Value for upper limit
+    /// \return array containing values from \p in clamped between \p lo and \p hi
+    AFAPI array clamp(const array &in, const array &lo, const array &hi);
+#endif
+
+#if AF_API_VERSION >= 34
+    /// \copydoc clamp(const array&, const array&, const array&)
+    AFAPI array clamp(const array &in, const array &lo, const double hi);
+#endif
+
+#if AF_API_VERSION >= 34
+    /// \copydoc clamp(const array&, const array&, const array&)
+    AFAPI array clamp(const array &in, const double lo, const array &hi);
+    /// @}
+#endif
+
+#if AF_API_VERSION >= 34
+    /// \copydoc clamp(const array&, const array&, const array&)
+    AFAPI array clamp(const array &in, const double lo, const double hi);
+    /// @}
+#endif
+
     /// \ingroup arith_func_rem
     /// @{
     /// C++ Interface for remainder when array divides array,
@@ -243,12 +272,15 @@ namespace af
     /// \param[in] lhs is real value(s)
     /// \param[in] rhs is imaginary value(s)
     /// \return complex array from inputs
+    /// \ingroup arith_func_cplx
     AFAPI array complex(const array &lhs, const array &rhs);
 
     /// \copydoc complex(const array&, const array&)
+    /// \ingroup arith_func_cplx
     AFAPI array complex(const array &lhs, const double rhs);
 
     /// \copydoc complex(const array&, const array&)
+    /// \ingroup arith_func_cplx
     AFAPI array complex(const double lhs, const array &rhs);
 
     /// C++ Interface for creating complex array from real array
@@ -386,6 +418,15 @@ namespace af
     AFAPI array pow2    (const array &in);
     /// @}
 
+#if AF_API_VERSION >= 31
+    /// C++ Interface for calculating sigmoid function of an array
+    ///
+    /// \param[in] in is input
+    /// \return the sigmoid of \p in
+    ///
+    /// \ingroup arith_func_sigmoid
+    AFAPI array sigmoid (const array &in);
+#endif
 
     /// C++ Interface for exponential of an array
     ///
@@ -566,7 +607,7 @@ extern "C" {
     /**
        C Interface for dividing an array by another
 
-       \param[out] out will contain result of \p lhs / \p rhs
+       \param[out] out will contain result of \p lhs / \p rhs.
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -579,7 +620,7 @@ extern "C" {
     /**
        C Interface for checking if an array is less than another
 
-       \param[out] out will contain result of \p lhs < \p rhs
+       \param[out] out will contain result of \p lhs < \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -592,7 +633,7 @@ extern "C" {
     /**
        C Interface for checking if an array is greater than another
 
-       \param[out] out will contain result of \p lhs > \p rhs
+       \param[out] out will contain result of \p lhs > \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -605,7 +646,7 @@ extern "C" {
     /**
        C Interface for checking if an array is less or equal to another
 
-       \param[out] out will contain result of \p lhs <= \p rhs
+       \param[out] out will contain result of \p lhs <= \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -618,7 +659,7 @@ extern "C" {
     /**
        C Interface for checking if an array is greater or equal to another
 
-       \param[out] out will contain result of \p lhs >= \p rhs
+       \param[out] out will contain result of \p lhs >= \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -631,7 +672,7 @@ extern "C" {
     /**
        C Interface for checking if an array is equal to another
 
-       \param[out] out will contain result of \p lhs == \p rhs
+       \param[out] out will contain result of \p lhs == \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -644,7 +685,7 @@ extern "C" {
     /**
        C Interface for checking if an array is not equal to another
 
-       \param[out] out will contain result of \p lhs != \p rhs
+       \param[out] out will contain result of \p lhs != \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -657,7 +698,7 @@ extern "C" {
     /**
        C Interface for performing logical and on two arrays
 
-       \param[out] out will contain result of \p lhs && \p rhs
+       \param[out] out will contain result of \p lhs && \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -670,7 +711,7 @@ extern "C" {
     /**
        C Interface for performing logical or on two arrays
 
-       \param[out] out will contain result of \p lhs || \p rhs
+       \param[out] out will contain result of \p lhs || \p rhs. out is of type b8
        \param[in] lhs first input
        \param[in] rhs second input
        \param[in] batch specifies if operations need to be performed in batch mode
@@ -683,7 +724,7 @@ extern "C" {
     /**
        C Interface for performing logical not on input
 
-       \param[out] out will contain result of logical not of \p in
+       \param[out] out will contain result of logical not of \p in. out is of type b8
        \param[in] in is the input
        \return \ref AF_SUCCESS if the execution completes properly
 
@@ -793,6 +834,23 @@ extern "C" {
        \ingroup arith_func_max
     */
     AFAPI af_err af_maxof (af_array *out, const af_array lhs, const af_array rhs, const bool batch);
+
+#if AF_API_VERSION >= 34
+    /**
+       C Interface for max of two arrays
+
+       \param[out] out will contain the values from \p clamped between \p lo and \p hi
+       \param[in] in Input array
+       \param[in] lo Value for lower limit
+       \param[in] hi Value for upper limit
+       \param[in] batch specifies if operations need to be performed in batch mode
+       \return \ref AF_SUCCESS if the execution completes properly
+
+       \ingroup arith_func_max
+    */
+    AFAPI af_err af_clamp(af_array *out, const af_array in,
+                          const af_array lo, const af_array hi, const bool batch);
+#endif
 
     /**
        C Interface for remainder
@@ -1165,6 +1223,19 @@ extern "C" {
     */
     AFAPI af_err af_exp     (af_array *out, const af_array in);
 
+#if AF_API_VERSION >= 31
+    /**
+       C Interface for calculating sigmoid function of an array
+
+       \param[out] out will contain the sigmoid of \p in
+       \param[in] in is input
+       \return \ref AF_SUCCESS if the execution completes properly
+
+       \ingroup arith_func_sigmoid
+    */
+    AFAPI af_err af_sigmoid (af_array *out, const af_array in);
+#endif
+
     /**
        C Interface for exponential of an array minus 1
 
@@ -1326,9 +1397,10 @@ extern "C" {
         \param[in] in is input
         \return \ref AF_SUCCESS if the execution completes properly
 
-        \ingroup arith_func_nan
+        \ingroup arith_func_isnan
     */
     AFAPI af_err af_isnan   (af_array *out, const af_array in);
+
 #ifdef __cplusplus
 }
 #endif

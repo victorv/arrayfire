@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <regions.hpp>
 #include <kernel/regions.hpp>
@@ -65,5 +63,7 @@ INSTANTIATE(float )
 INSTANTIATE(double)
 INSTANTIATE(int   )
 INSTANTIATE(uint  )
+INSTANTIATE(short )
+INSTANTIATE(ushort)
 
 }

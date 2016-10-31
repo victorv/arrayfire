@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <iir.hpp>
 #include <err_cuda.hpp>
@@ -26,9 +24,9 @@ namespace cuda
     Array<T> iir(const Array<T> &b, const Array<T> &a, const Array<T> &x)
     {
 
-        ConvolveBatchKind type = x.ndims() == 1 ? ONE2ONE : MANY2MANY;
+        AF_BATCH_KIND type = x.ndims() == 1 ? AF_BATCH_NONE : AF_BATCH_SAME;
         if (x.ndims() != b.ndims()) {
-            type = (x.ndims() < b.ndims()) ? ONE2MANY : MANY2ONE;
+            type = (x.ndims() < b.ndims()) ? AF_BATCH_RHS : AF_BATCH_LHS;
         }
 
         // Extract the first N elements

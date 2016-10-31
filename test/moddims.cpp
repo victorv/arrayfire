@@ -36,7 +36,7 @@ class Moddims : public ::testing::Test
 
 // create a list of types to be tested
 // TODO: complex types tests have to be added
-typedef ::testing::Types<float, double, int, unsigned, char, unsigned char> TestTypes;
+typedef ::testing::Types<float, double, int, unsigned, char, unsigned char, short, ushort> TestTypes;
 
 // register the type list
 TYPED_TEST_CASE(Moddims, TestTypes);
@@ -136,7 +136,7 @@ void moddimsArgsTest(string pTestFile)
     af::dim4 newDims(1);
     newDims[0] = dims[1];
     newDims[1] = dims[0]*dims[2];
-    ASSERT_EQ(AF_ERR_ARG, af_moddims(&outArray,inArray,0,newDims.get()));
+    ASSERT_EQ(AF_SUCCESS, af_moddims(&outArray,inArray,0,newDims.get()));
     ASSERT_EQ(AF_ERR_ARG, af_moddims(&outArray,inArray,newDims.ndims(),NULL));
 
     ASSERT_EQ(AF_SUCCESS, af_release_array(inArray));

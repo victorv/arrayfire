@@ -221,3 +221,284 @@ TEST(GFOR, Inc_Array_Seq)
     delete[] hB;
     delete[] hC;
 }
+
+TEST(BatchFunc, 2D0)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    array A = randu(nx, ny);
+    array B = randu( 1, ny);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int j = 0; j < ny; j++) {
+        for (int i = 0; i < nx; i++) {
+            ASSERT_EQ(hA[j * nx + i] + hB[j], hC[j * nx + i]);
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 2D1)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    array A = randu(nx, ny);
+    array B = randu(nx, 1);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int j = 0; j < ny; j++) {
+        for (int i = 0; i < nx; i++) {
+            ASSERT_EQ(hA[j * nx + i] + hB[i], hC[j * nx + i]);
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 3D0)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    array A = randu(nx, ny, nz);
+    array B = randu( 1, ny, nz);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                ASSERT_EQ(hA[k * ny * nx + j * nx + i] + hB[k * ny + j], hC[k * ny * nx + j * nx + i]);
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 3D1)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    array A = randu(nx, ny, nz);
+    array B = randu(nx,  1, nz);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                ASSERT_EQ(hA[k * ny * nx + j * nx + i] + hB[k * nx + i], hC[k * ny * nx + j * nx + i]);
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 3D2)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    array A = randu(nx, ny, nz);
+    array B = randu(nx, ny,  1);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                ASSERT_EQ(hA[k * ny * nx + j * nx + i] + hB[j * nx + i], hC[k * ny * nx + j * nx + i]);
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 3D01)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    array A = randu(nx, ny, nz);
+    array B = randu( 1,  1, nz);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                ASSERT_EQ(hA[k * ny * nx + j * nx + i] + hB[k], hC[k * ny * nx + j * nx + i]);
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 3D_1_2)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    array A = randu(nx, ny,  1);
+    array B = randu(nx,  1, nz);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                ASSERT_EQ(hA[j * nx + i] + hB[k * nx + i], hC[k * ny * nx + j * nx + i]);
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(BatchFunc, 4D3)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    const int nw = 2;
+    array A = randu(nx, ny, nz, nw);
+    array B = randu(nx, ny, nz,  1);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int l = 0; l < nw; l++) {
+        for (int k = 0; k < nz; k++) {
+            for (int j = 0; j < ny; j++) {
+                for (int i = 0; i < nx; i++) {
+                    ASSERT_EQ(hA[l * nz * ny * nx + k * ny * nx + j * nx + i] +
+                              hB[k * ny * nx + j * nx + i],
+                              hC[l * nz * ny * nx + k * ny * nx + j * nx + i]);
+                }
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+
+TEST(BatchFunc, 4D_2_3)
+{
+    const int nx = 1000;
+    const int ny = 10;
+    const int nz = 3;
+    const int nw = 2;
+    array A = randu(nx,  1, nz, nw);
+    array B = randu(nx, ny,  1,  1);
+
+    gforSet(true);
+
+    array C = A + B;
+
+    float *hA = A.host<float>();
+    float *hB = B.host<float>();
+    float *hC = C.host<float>();
+
+    for (int l = 0; l < nw; l++) {
+        for (int k = 0; k < nz; k++) {
+            for (int j = 0; j < ny; j++) {
+                for (int i = 0; i < nx; i++) {
+                    ASSERT_EQ(hA[l * nz * nx + k * nx + i] +
+                              hB[j * nx + i], hC[l * nz * ny * nx + k * ny * nx + j * nx + i]);
+                }
+            }
+        }
+    }
+
+    gforSet(false);
+}
+
+TEST(ASSIGN, ISSUE_1127)
+{
+    using namespace af;
+    array orig = randu(512, 768, 3);
+    array vert = randu(512, 768, 3);
+    array horiz = randu(512, 768, 3);
+    array diag = randu(512, 768, 3);
+
+    array out0 = constant(0, orig.dims(0) * 2, orig.dims(1) * 2, orig.dims(2));
+    array out1 = constant(0, orig.dims(0) * 2, orig.dims(1) * 2, orig.dims(2));
+    int rows = out0.dims(0), cols = out0.dims(1);
+
+    gfor(seq chan, 3) {
+        out0(seq(0,rows-1,2), seq(0,cols-1,2), chan) = orig(span,span,chan);
+        out0(seq(1,rows-1,2), seq(0,cols-1,2), chan) = vert(span,span,chan);
+        out0(seq(0,rows-1,2), seq(1,cols-1,2), chan) = horiz(span,span,chan);
+        out0(seq(1,rows-1,2), seq(1,cols-1,2), chan) = diag(span,span,chan);
+    }
+    out1(seq(0,rows-1,2), seq(0,cols-1,2), span) = orig;
+    out1(seq(1,rows-1,2), seq(0,cols-1,2), span) = vert;
+    out1(seq(0,rows-1,2), seq(1,cols-1,2), span) = horiz;
+    out1(seq(1,rows-1,2), seq(1,cols-1,2), span) = diag;
+
+    std::vector<float> hout0(out0.elements());
+    std::vector<float> hout1(out1.elements());
+
+    out0.host(&hout0[0]);
+    out1.host(&hout1[0]);
+
+    for (int i = 0; i < out0.elements(); i++) {
+        ASSERT_EQ(hout0[i], hout1[i]);
+    }
+}

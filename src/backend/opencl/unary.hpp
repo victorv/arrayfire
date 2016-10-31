@@ -16,7 +16,7 @@ namespace opencl
 {
 
 template<af_op_t op>
-static const char *unaryName() { return "noop"; }
+static const char *unaryName() { return "__noop"; }
 
 #define UNARY_DECL(OP, FNAME)                   \
     template<> STATIC_                          \
@@ -44,6 +44,7 @@ UNARY_FN(acosh)
 UNARY_FN(atanh)
 
 UNARY_FN(exp)
+UNARY_DECL(sigmoid, "__sigmoid")
 UNARY_FN(expm1)
 UNARY_FN(erf)
 UNARY_FN(erfc)

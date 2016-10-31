@@ -20,8 +20,27 @@
 ######## This FindFFTW.cmake file is a copy of the file from the eigen library
 ######## http://code.metager.de/source/xref/lib/eigen/cmake/FindFFTW.cmake
 
-IF(NOT FFTW_ROOT AND ENV{FFTWDIR})
+IF(NOT FFTW_ROOT)
     SET(FFTW_ROOT $ENV{FFTWDIR})
+ENDIF()
+
+IF (NOT INTEL_MKL_ROOT_DIR)
+  SET(INTEL_MKL_ROOT_DIR $ENV{INTEL_MKL_ROOT})
+ENDIF()
+
+IF(NOT FFTW_ROOT)
+
+  IF (ENV{FFTWDIR})
+    SET(FFTW_ROOT $ENV{FFTWDIR})
+  ENDIF()
+
+  IF (ENV{FFTW_ROOT_DIR})
+    SET(FFTW_ROOT $ENV{FFTW_ROOT_DIR})
+  ENDIF()
+
+  IF (INTEL_MKL_ROOT_DIR)
+    SET(FFTW_ROOT ${INTEL_MKL_ROOT_DIR})
+  ENDIF()
 ENDIF()
 
 # Check if we can use PkgConfig
@@ -40,20 +59,26 @@ ELSE()
     SET(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_SHARED_LIBRARY_SUFFIX})
 ENDIF()
 
+IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+  SET(MKL_LIB_DIR_SUFFIX "intel64")
+ELSE()
+  SET(MKL_LIB_DIR_SUFFIX "ia32")
+ENDIF()
+
 IF(FFTW_ROOT)
     #find libs
     FIND_LIBRARY(
         FFTW_LIB
-        NAMES "fftw3" "libfftw3-3" "fftw3-3"
+        NAMES "fftw3" "libfftw3-3" "fftw3-3" "mkl_rt"
         PATHS ${FFTW_ROOT}
-        PATH_SUFFIXES "lib" "lib64"
+        PATH_SUFFIXES "lib" "lib64" "lib/${MKL_LIB_DIR_SUFFIX}"
         NO_DEFAULT_PATH
         )
     FIND_LIBRARY(
         FFTWF_LIB
-        NAMES "fftw3f" "libfftw3f-3" "fftw3f-3"
+        NAMES "fftw3f" "libfftw3f-3" "fftw3f-3" "mkl_rt"
         PATHS ${FFTW_ROOT}
-        PATH_SUFFIXES "lib" "lib64"
+        PATH_SUFFIXES "lib" "lib64" "lib/${MKL_LIB_DIR_SUFFIX}"
         NO_DEFAULT_PATH
         )
 
@@ -62,18 +87,18 @@ IF(FFTW_ROOT)
         FFTW_INCLUDES
         NAMES "fftw3.h"
         PATHS ${FFTW_ROOT}
-        PATH_SUFFIXES "include"
+        PATH_SUFFIXES "include" "include/fftw"
         NO_DEFAULT_PATH
         )
 ELSE()
     FIND_LIBRARY(
         FFTW_LIB
-        NAMES "fftw3"
+        NAMES "fftw3" "mkl_rt"
         PATHS ${PKG_FFTW_LIBRARY_DIRS} ${LIB_INSTALL_DIR}
         )
     FIND_LIBRARY(
         FFTWF_LIB
-        NAMES "fftw3f"
+        NAMES "fftw3f" "mkl_rt"
         PATHS ${PKG_FFTW_LIBRARY_DIRS} ${LIB_INSTALL_DIR}
         )
     FIND_PATH(
@@ -91,4 +116,4 @@ INCLUDE(FindPackageHandleStandardArgs)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(FFTW DEFAULT_MSG
     FFTW_INCLUDES FFTW_LIBRARIES)
 
-MARK_AS_ADVANCED(FFTW_INCLUDES FFTW_LIBRARIES)
+MARK_AS_ADVANCED(FFTW_INCLUDES FFTW_LIBRARIES FFTW_LIB FFTWF_LIB)

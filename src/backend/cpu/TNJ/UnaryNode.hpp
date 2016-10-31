@@ -8,7 +8,6 @@
  ********************************************************/
 
 #pragma once
-#include <af/array.h>
 #include <optypes.hpp>
 #include <vector>
 #include <math.hpp>
@@ -44,12 +43,23 @@ namespace TNJ
             m_child(in),
             m_val(0)
         {
+            m_height = m_child->getHeight() + 1;
         }
 
         void *calc(int x, int y, int z, int w)
         {
-            m_val = m_op.eval(*(Ti *)m_child->calc(x, y, z, w));
+            if (calcCurrent(x, y, z, w)) {
+                m_val = m_op.eval(*(Ti *)m_child->calc(x, y, z, w));
+            }
             return (void *)(&m_val);
+        }
+
+        void *calc(int idx)
+        {
+            if (calcCurrent(idx)) {
+                m_val = m_op.eval(*(Ti *)m_child->calc(idx));
+            }
+            return (void *)&m_val;
         }
 
         void getInfo(unsigned &len, unsigned &buf_count, unsigned &bytes)
@@ -63,10 +73,19 @@ namespace TNJ
             return;
         }
 
-        void reset(bool reset_off=true)
+        void reset()
         {
-            m_child->reset(reset_off);
-            m_is_eval = false;
+            resetCommonFlags();
+            m_child->reset();
+        }
+
+        bool isLinear(const dim_t *dims)
+        {
+            if (!m_set_is_linear) {
+                m_linear = m_child->isLinear(dims);
+                m_set_is_linear = true;
+            }
+            return m_linear;
         }
     };
 

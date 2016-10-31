@@ -26,7 +26,7 @@ using af::cfloat;
 using af::cdouble;
 
 template<typename T>
-class Sort : public ::testing::Test
+class SortByKey : public ::testing::Test
 {
     public:
         virtual void SetUp() {
@@ -38,10 +38,10 @@ class Sort : public ::testing::Test
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<float, double, uint, int, uchar> TestTypes;
+typedef ::testing::Types<float, double, uint, int, uchar, short, ushort, intl, uintl> TestTypes;
 
 // register the type list
-TYPED_TEST_CASE(Sort, TestTypes);
+TYPED_TEST_CASE(SortByKey, TestTypes);
 
 template<typename T>
 void sortTest(string pTestFile, const bool dir, const unsigned resultIdx0, const unsigned resultIdx1, bool isSubRef = false, const vector<af_seq> * seqv = NULL)
@@ -104,10 +104,10 @@ void sortTest(string pTestFile, const bool dir, const unsigned resultIdx0, const
     if(tempArray != 0) af_release_array(tempArray);
 }
 
-#define SORT_INIT(desc, file, dir, resultIdx0, resultIdx1)                                       \
-    TYPED_TEST(Sort, desc)                                                                       \
-    {                                                                                            \
-        sortTest<TypeParam>(string(TEST_DIR"/sort/"#file".test"), dir, resultIdx0, resultIdx1);  \
+#define SORT_INIT(desc, file, dir, resultIdx0, resultIdx1)              \
+    TYPED_TEST(SortByKey, desc)                                         \
+    {                                                                   \
+        sortTest<TypeParam>(string(TEST_DIR"/sort/"#file".test"), dir, resultIdx0, resultIdx1); \
     }
 
     SORT_INIT(Sort0True,      sort_by_key_tiny,  true,  0, 1);
@@ -115,19 +115,19 @@ void sortTest(string pTestFile, const bool dir, const unsigned resultIdx0, const
     SORT_INIT(Sort10x10True,  sort_by_key_2D,    true,  0, 1);
     SORT_INIT(Sort10x10False, sort_by_key_2D,    false, 2, 3);
     SORT_INIT(Sort1000True,   sort_by_key_1000,  true,  0, 1);
-    SORT_INIT(Sort1000False,  sort_by_key_1000,  false, 2, 3);
     SORT_INIT(SortMedTrue,    sort_by_key_med,   true,  0, 1);
+    SORT_INIT(Sort1000False,  sort_by_key_1000,  false, 2, 3);
     SORT_INIT(SortMedFalse,   sort_by_key_med,   false, 2, 3);
-    // Takes too much time in current implementation. Enable when everything is parallel
-    //SORT_INIT(SortLargeTrue,  sort_by_key_large, true,  0, 1);
-    //SORT_INIT(SortLargeFalse, sort_by_key_large, false, 2, 3);
+
+    SORT_INIT(SortLargeTrue,  sort_by_key_large, true,  0, 1);
+    SORT_INIT(SortLargeFalse, sort_by_key_large, false, 2, 3);
 
 
 
 
 ////////////////////////////////////// CPP ///////////////////////////////
 //
-TEST(SortByKey, CPP)
+TEST(SortByKey, CPPDim0)
 {
     if (noDoubleTests<float>()) return;
 
@@ -169,3 +169,100 @@ TEST(SortByKey, CPP)
     delete[] valData;
 }
 
+TEST(SortByKey, CPPDim1)
+{
+    if (noDoubleTests<float>()) return;
+
+    const bool dir = true;
+    const unsigned resultIdx0 = 0;
+    const unsigned resultIdx1 = 1;
+
+    vector<af::dim4> numDims;
+    vector<vector<float> > in;
+    vector<vector<float> > tests;
+    readTests<float, float, int>(string(TEST_DIR"/sort/sort_by_key_large.test"),numDims,in,tests);
+
+    af::dim4 idims = numDims[0];
+    af::array keys(idims, &(in[0].front()));
+    af::array vals(idims, &(in[1].front()));
+
+    af::array keys_ = reorder(keys, 1, 0, 2, 3);
+    af::array vals_ = reorder(vals, 1, 0, 2, 3);
+
+    af::array out_keys, out_vals;
+    af::sort(out_keys, out_vals, keys_, vals_, 1, dir);
+
+    out_keys = reorder(out_keys, 1, 0, 2, 3);
+    out_vals = reorder(out_vals, 1, 0, 2, 3);
+
+    size_t nElems = tests[resultIdx0].size();
+    // Get result
+    float* keyData = new float[tests[resultIdx0].size()];
+    out_keys.host((void*)keyData);
+
+    // Compare result
+    for (size_t elIter = 0; elIter < nElems; ++elIter) {
+        ASSERT_EQ(tests[resultIdx0][elIter], keyData[elIter]) << "at: " << elIter << std::endl;
+    }
+
+    float* valData = new float[tests[resultIdx1].size()];
+    out_vals.host((void*)valData);
+
+    // Compare result
+    for (size_t elIter = 0; elIter < nElems; ++elIter) {
+        ASSERT_EQ(tests[resultIdx1][elIter], valData[elIter]) << "at: " << elIter << std::endl;
+    }
+
+    // Delete
+    delete[] keyData;
+    delete[] valData;
+}
+
+TEST(SortByKey, CPPDim2)
+{
+    if (noDoubleTests<float>()) return;
+
+    const bool dir = false;
+    const unsigned resultIdx0 = 2;
+    const unsigned resultIdx1 = 3;
+
+    vector<af::dim4> numDims;
+    vector<vector<float> > in;
+    vector<vector<float> > tests;
+    readTests<float, float, int>(string(TEST_DIR"/sort/sort_by_key_large.test"),numDims,in,tests);
+
+    af::dim4 idims = numDims[0];
+    af::array keys(idims, &(in[0].front()));
+    af::array vals(idims, &(in[1].front()));
+
+    af::array keys_ = reorder(keys, 1, 2, 0, 3);
+    af::array vals_ = reorder(vals, 1, 2, 0, 3);
+
+    af::array out_keys, out_vals;
+    af::sort(out_keys, out_vals, keys_, vals_, 2, dir);
+
+    out_keys = reorder(out_keys, 2, 0, 1, 3);
+    out_vals = reorder(out_vals, 2, 0, 1, 3);
+
+    size_t nElems = tests[resultIdx0].size();
+    // Get result
+    float* keyData = new float[tests[resultIdx0].size()];
+    out_keys.host((void*)keyData);
+
+    // Compare result
+    for (size_t elIter = 0; elIter < nElems; ++elIter) {
+        ASSERT_EQ(tests[resultIdx0][elIter], keyData[elIter]) << "at: " << elIter << std::endl;
+    }
+
+    float* valData = new float[tests[resultIdx1].size()];
+    out_vals.host((void*)valData);
+
+    // Compare result
+    for (size_t elIter = 0; elIter < nElems; ++elIter) {
+        ASSERT_EQ(tests[resultIdx1][elIter], valData[elIter]) << "at: " << elIter << std::endl;
+    }
+
+    // Delete
+    delete[] keyData;
+    delete[] valData;
+}

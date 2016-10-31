@@ -7,6 +7,12 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#if USE_NATIVE_EXP
+#define EXP native_exp
+#else
+#define EXP exp
+#endif
+
 int lIdx(int x, int y,
         int stride1, int stride0)
 {
@@ -25,11 +31,6 @@ void load2LocalMem(__local outType *  shrd,
     shrd[ lIdx(lx, ly, shrdStride, 1) ] = (outType)in[ lIdx(gx_, gy_, inStride1, inStride0) ];
 }
 
-float gaussian1d(float x, float variance)
-{
-    return exp((x * x) / (-2.f * variance));
-}
-
 __kernel
 void bilateral(__global outType *        d_dst,
                KParam                    oInfo,
@@ -46,6 +47,8 @@ void bilateral(__global outType *        d_dst,
     const int shrdLen     = get_local_size(0) + padding;
     const float variance_range = sigma_color * sigma_color;
     const float variance_space = sigma_space * sigma_space;
+    const float variance_space_neg2 = -2.0 * variance_space;
+    const float inv_variance_range_neg2 = -0.5 / (variance_range);
 
     // gfor batch offsets
     unsigned b2 = get_group_id(0) / nBBS0;
@@ -63,33 +66,21 @@ void bilateral(__global outType *        d_dst,
     if (lx<window_size && ly<window_size) {
         int x = lx - radius;
         int y = ly - radius;
-        gauss2d[ly*window_size+lx] = exp( ((x*x) + (y*y)) / (-2.f * variance_space));
+        gauss2d[ly*window_size+lx] = EXP(((x*x) + (y*y)) / variance_space_neg2);
     }
 
-    int lx2 = lx + get_local_size(0);
-    int ly2 = ly + get_local_size(1);
-    int gx2 = gx + get_local_size(0);
-    int gy2 = gy + get_local_size(1);
-
+    int s0 = iInfo.strides[0];
+    int s1 = iInfo.strides[1];
+    int d0 = iInfo.dims[0];
+    int d1 = iInfo.dims[1];
     // pull image to local memory
-    load2LocalMem(localMem, in, lx, ly, shrdLen,
-                 iInfo.dims[0], iInfo.dims[1], gx-radius,
-                 gy-radius, iInfo.strides[1], iInfo.strides[0]);
-    if (lx<padding) {
-        load2LocalMem(localMem, in, lx2, ly, shrdLen,
-                     iInfo.dims[0], iInfo.dims[1], gx2-radius,
-                     gy-radius, iInfo.strides[1], iInfo.strides[0]);
+    for (int b=ly, gy2=gy; b<shrdLen; b+=get_local_size(1), gy2+=get_local_size(1)) {
+        // move row_set get_local_size(1) along coloumns
+        for (int a=lx, gx2=gx; a<shrdLen; a+=get_local_size(0), gx2+=get_local_size(0)) {
+            load2LocalMem(localMem, in, a, b, shrdLen, d0, d1, gx2-radius, gy2-radius, s1, s0);
+        }
     }
-    if (ly<padding) {
-        load2LocalMem(localMem, in, lx, ly2, shrdLen,
-                     iInfo.dims[0], iInfo.dims[1], gx-radius,
-                     gy2-radius, iInfo.strides[1], iInfo.strides[0]);
-    }
-    if (lx<padding && ly<padding) {
-        load2LocalMem(localMem, in, lx2, ly2, shrdLen,
-                     iInfo.dims[0], iInfo.dims[1], gx2-radius,
-                     gy2-radius, iInfo.strides[1], iInfo.strides[0]);
-    }
+
     barrier(CLK_LOCAL_MEM_FENCE);
 
     if (gx<iInfo.dims[0] && gy<iInfo.dims[1]) {
@@ -98,18 +89,23 @@ void bilateral(__global outType *        d_dst,
         outType center_color = localMem[ly*shrdLen+lx];
         outType res  = 0;
         outType norm = 0;
+
+        int joff = (ly - radius)*shrdLen + (lx-radius);
+        int goff = 0;
+
 #pragma unroll
         for(int wj=0; wj<window_size; ++wj) {
-            int joff = (ly+wj-radius)*shrdLen + (lx-radius);
-            int goff = wj*window_size;
 #pragma unroll
             for(int wi=0; wi<window_size; ++wi) {
                 outType tmp_color   = localMem[joff+wi];
-                outType gauss_range = gaussian1d(center_color - tmp_color, variance_range);
+                const outType c = center_color - tmp_color;
+                outType gauss_range = EXP(c * c * inv_variance_range_neg2);
                 outType weight      = gauss2d[goff+wi] * gauss_range;
                 norm += weight;
                 res  += tmp_color * weight;
             }
+            joff += shrdLen;
+            goff += window_size;
         }
         out[gy*oInfo.strides[1] + gx] = res / norm;
     }

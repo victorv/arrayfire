@@ -22,10 +22,24 @@ namespace af
         return array(out);
     }
 
+    array sum(const array &in, const int dim, const double nanval)
+    {
+        af_array out = 0;
+        AF_THROW(af_sum_nan(&out, in.get(), dim, nanval));
+        return array(out);
+    }
+
     array product(const array &in, const int dim)
     {
         af_array out = 0;
         AF_THROW(af_product(&out, in.get(), getFNSD(dim, in.dims())));
+        return array(out);
+    }
+
+    array product(const array &in, const int dim, const double nanval)
+    {
+        af_array out = 0;
+        AF_THROW(af_product_nan(&out, in.get(), dim, nanval));
         return array(out);
     }
 
@@ -91,6 +105,23 @@ namespace af
         idx = array(loc);
     }
 
+
+#define INSTANTIATE(fnC, fnCPP)                         \
+    INSTANTIATE_REAL(fnC, fnCPP, float)                 \
+    INSTANTIATE_REAL(fnC, fnCPP, double)                \
+    INSTANTIATE_REAL(fnC, fnCPP, int)                   \
+    INSTANTIATE_REAL(fnC, fnCPP, unsigned)              \
+    INSTANTIATE_REAL(fnC, fnCPP, long)                  \
+    INSTANTIATE_REAL(fnC, fnCPP, unsigned long)         \
+    INSTANTIATE_REAL(fnC, fnCPP, long long)             \
+    INSTANTIATE_REAL(fnC, fnCPP, unsigned long long)    \
+    INSTANTIATE_REAL(fnC, fnCPP, short)                 \
+    INSTANTIATE_REAL(fnC, fnCPP, unsigned short)        \
+    INSTANTIATE_REAL(fnC, fnCPP, char)                  \
+    INSTANTIATE_REAL(fnC, fnCPP, unsigned char)         \
+    INSTANTIATE_CPLX(fnC, fnCPP, af_cfloat, float)      \
+    INSTANTIATE_CPLX(fnC, fnCPP, af_cdouble, double)    \
+
 #define INSTANTIATE_REAL(fnC, fnCPP, T)                     \
     template<> AFAPI                                        \
     T fnCPP(const array &in)                                \
@@ -111,20 +142,6 @@ namespace af
         return out;                                         \
     }                                                       \
 
-#define INSTANTIATE(fnC, fnCPP)                         \
-    INSTANTIATE_REAL(fnC, fnCPP, float)                 \
-    INSTANTIATE_REAL(fnC, fnCPP, double)                \
-    INSTANTIATE_REAL(fnC, fnCPP, int)                   \
-    INSTANTIATE_REAL(fnC, fnCPP, unsigned)              \
-    INSTANTIATE_REAL(fnC, fnCPP, long)                  \
-    INSTANTIATE_REAL(fnC, fnCPP, unsigned long)         \
-    INSTANTIATE_REAL(fnC, fnCPP, long long)             \
-    INSTANTIATE_REAL(fnC, fnCPP, unsigned long long)    \
-    INSTANTIATE_REAL(fnC, fnCPP, char)                  \
-    INSTANTIATE_REAL(fnC, fnCPP, unsigned char)         \
-    INSTANTIATE_CPLX(fnC, fnCPP, af_cfloat, float)      \
-    INSTANTIATE_CPLX(fnC, fnCPP, af_cdouble, double)    \
-
     INSTANTIATE(sum, sum)
     INSTANTIATE(product, product)
     INSTANTIATE(min, min)
@@ -136,15 +153,41 @@ namespace af
     INSTANTIATE_REAL(all_true, allTrue, bool);
     INSTANTIATE_REAL(any_true, anyTrue, bool);
 
-#undef INSTANTIATE
 #undef INSTANTIATE_REAL
 #undef INSTANTIATE_CPLX
 
-#define INSTANTIATE_COMPAT(fnCPP, fnCompat, T)              \
-    template<> AFAPI                                        \
-    T fnCompat(const array &in)                             \
-    {                                                       \
-        return fnCPP<T>(in);                                      \
+#define INSTANTIATE_REAL(fnC, fnCPP, T)                             \
+    template<> AFAPI                                                \
+    T fnCPP(const array &in, const double nanval)                   \
+    {                                                               \
+        double rval, ival;                                          \
+        AF_THROW(af_##fnC##_all(&rval, &ival, in.get(), nanval));   \
+        return (T)(rval);                                           \
+    }                                                               \
+
+
+#define INSTANTIATE_CPLX(fnC, fnCPP, T, Tr)                         \
+    template<> AFAPI                                                \
+    T fnCPP(const array &in, const double nanval)                   \
+    {                                                               \
+        double rval, ival;                                          \
+        AF_THROW(af_##fnC##_all(&rval, &ival, in.get(), nanval));   \
+        T out((Tr)rval, (Tr)ival);                                  \
+        return out;                                                 \
+    }                                                               \
+
+INSTANTIATE(sum_nan, sum)
+INSTANTIATE(product_nan, product)
+
+#undef INSTANTIATE_REAL
+#undef INSTANTIATE_CPLX
+#undef INSTANTIATE
+
+#define INSTANTIATE_COMPAT(fnCPP, fnCompat, T)  \
+    template<> AFAPI                            \
+    T fnCompat(const array &in)                 \
+    {                                           \
+        return fnCPP<T>(in);                    \
     }
 
 #define INSTANTIATE(fnCPP, fnCompat)                            \
@@ -160,10 +203,15 @@ namespace af
     INSTANTIATE_COMPAT(fnCPP, fnCompat, unsigned char)          \
     INSTANTIATE_COMPAT(fnCPP, fnCompat, af_cfloat)              \
     INSTANTIATE_COMPAT(fnCPP, fnCompat, af_cdouble)             \
+    INSTANTIATE_COMPAT(fnCPP, fnCompat, short)                  \
+    INSTANTIATE_COMPAT(fnCPP, fnCompat, unsigned short)         \
 
     INSTANTIATE(product, mul)
     INSTANTIATE(allTrue, alltrue)
     INSTANTIATE(anyTrue, anytrue)
+
+    INSTANTIATE_COMPAT(allTrue, alltrue, bool)
+    INSTANTIATE_COMPAT(anyTrue, anytrue, bool)
 
 #undef INSTANTIATE
 #undef INSTANTIATE_COMPAT
@@ -194,6 +242,8 @@ namespace af
     INSTANTIATE_REAL(fn, unsigned)              \
     INSTANTIATE_REAL(fn, char)                  \
     INSTANTIATE_REAL(fn, unsigned char)         \
+    INSTANTIATE_REAL(fn, short)                 \
+    INSTANTIATE_REAL(fn, unsigned short)        \
     INSTANTIATE_CPLX(fn, af_cfloat, float)      \
     INSTANTIATE_CPLX(fn, af_cdouble, double)    \
 

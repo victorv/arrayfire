@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -95,7 +94,7 @@ void lookup(Param<in_t> out, CParam<in_t> in, CParam<idx_t> indices, int nDims)
 
         dim3 blocks(blks, 1);
 
-        lookup1D<in_t, idx_t> <<<blocks, threads>>> (out, in, indices, vDim);
+        CUDA_LAUNCH((lookup1D<in_t, idx_t>), blocks, threads, out, in, indices, vDim);
     } else {
         const dim3 threads(THREADS_X, THREADS_Y);
 
@@ -104,7 +103,7 @@ void lookup(Param<in_t> out, CParam<in_t> in, CParam<idx_t> indices, int nDims)
 
         dim3 blocks(blks_x*out.dims[2], blks_y*out.dims[3]);
 
-        lookupND<in_t, idx_t, dim> <<<blocks, threads>>> (out, in, indices, blks_x, blks_y);
+        CUDA_LAUNCH((lookupND<in_t, idx_t, dim>), blocks, threads, out, in, indices, blks_x, blks_y);
     }
 
     POST_LAUNCH_CHECK();

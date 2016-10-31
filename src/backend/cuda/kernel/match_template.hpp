@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -135,7 +134,8 @@ void matchTemplate(Param<outType> out, CParam<inType> srch, CParam<inType> tmplt
 
     dim3 blocks(blk_x*srch.dims[2], blk_y*srch.dims[3]);
 
-    matchTemplate<inType, outType, mType, needMean> <<< blocks, threads >>> (out, srch, tmplt, blk_x, blk_y);
+    CUDA_LAUNCH((matchTemplate<inType, outType, mType, needMean>), blocks, threads,
+            out, srch, tmplt, blk_x, blk_y);
 
     POST_LAUNCH_CHECK();
 }

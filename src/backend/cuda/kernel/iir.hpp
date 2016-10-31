@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -89,7 +88,7 @@ namespace cuda
             int threads = 256;
             while (threads > y.dims[0] && threads > 32) threads /= 2;
 
-            (iir_kernel<T, batch_a>)<<<blocks, threads>>>(y, c, a, blocks_y);
+            CUDA_LAUNCH((iir_kernel<T, batch_a>), blocks, threads, y, c, a, blocks_y);
         }
 
     }

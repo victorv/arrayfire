@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <morph.hpp>
 #include <kernel/morph.hpp>
@@ -32,9 +30,10 @@ Array<T>  morph(const Array<T> &in, const Array<T> &mask)
 
     Array<T> out = createEmptyArray<T>(in.dims());
 
-    CUDA_CHECK(cudaMemcpyToSymbol(kernel::cFilter, mask.get(),
+    CUDA_CHECK(cudaMemcpyToSymbolAsync(kernel::cFilter, mask.get(),
                                   mdims[0] * mdims[1] * sizeof(T),
-                                  0, cudaMemcpyDeviceToDevice));
+                                  0, cudaMemcpyDeviceToDevice,
+                                  cuda::getStream(cuda::getActiveDeviceId())));
 
     if (isDilation)
         kernel::morph<T, true >(out, in, mdims[0]);

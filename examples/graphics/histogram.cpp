@@ -19,10 +19,15 @@ int main(int argc, char *argv[])
         // Initialize the kernel array just once
         af::info();
         af::Window myWindow(512, 512, "Histogram example using ArrayFire");
-        af::Window imgWnd("Input Image");
+        af::Window imgWnd(480, 640, "Input Image");
 
-        array img = loadImage(ASSETS_DIR"/examples/images/lena.ppm", false);
+        array img = loadImage(ASSETS_DIR"/examples/images/arrow.jpg", false);
         array hist_out = histogram(img, 256, 0, 255);
+
+        float freq_max = max<float>(hist_out);
+        myWindow.setAxesLimits(0, 255, 0, freq_max);
+        myWindow.setAxesTitles("Bins", "Frequency");
+        myWindow.setPos(480, 0);
 
         while (!myWindow.close() && !imgWnd.close()) {
             myWindow.hist(hist_out, 0, 255);
@@ -34,14 +39,5 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s\n", e.what());
         throw;
     }
-
-#ifdef WIN32 // pause in Windows
-    if (!(argc == 2 && argv[1][0] == '-')) {
-        printf("hit [enter]...");
-        fflush(stdout);
-        getchar();
-    }
-#endif
     return 0;
 }
-

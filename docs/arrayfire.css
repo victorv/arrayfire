@@ -10,6 +10,12 @@ p
     padding-left    :   10px;
 }
 
+p code
+{
+    font-weight     :   bold;
+    background-color:   #F7F7F7;
+}
+
 /* @group Heading Levels */
 /* Increase the size of the page title */
 .title
@@ -44,12 +50,6 @@ a.code, a.code:visited, a.line, a.line:visited
 a.codeRef, a.codeRef:visited, a.lineRef, a.lineRef:visited
 {
     color       :   #4665A2;
-}
-
-@font-face
-{
-    font-family :   prototype;
-    src         :   url('Prototype.ttf');
 }
 
 /*image and image groups*/
@@ -90,7 +90,6 @@ div.support *
 
 #under_logo
 {
-    font-family :   prototype;
     font-size   :   2em;
     max-width   :   25px;
     color       :   #000000;
@@ -98,7 +97,6 @@ div.support *
 
 #projectbrief
 {
-    font-family :   prototype;
     color       :   #555555
 }
 
@@ -115,7 +113,6 @@ div.support *
 
 #projectname
 {
-    font-family     :   prototype;
     font-size       :   3em;
     max-width       :   25px;
     color           :   #555555
@@ -182,6 +179,11 @@ div.fragment
 {
     background-color    :   #F7F7F7;
     border              :   1px solid #DFDFDF;
+}
+
+pre
+{
+    overflow            : hidden;
 }
 
 /* @end */

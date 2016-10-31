@@ -23,6 +23,7 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 using af::dim4;
@@ -30,7 +31,7 @@ using af::dim4;
 template<typename T>
 class Triangle : public ::testing::Test { };
 
-typedef ::testing::Types<float, af::cfloat, double, af::cdouble, int, unsigned, char, uchar, uintl, intl> TestTypes;
+typedef ::testing::Types<float, af::cfloat, double, af::cdouble, int, unsigned, char, uchar, uintl, intl, short, ushort> TestTypes;
 TYPED_TEST_CASE(Triangle, TestTypes);
 
 template<typename T>

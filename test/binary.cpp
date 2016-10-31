@@ -13,7 +13,9 @@
 #include <af/data.h>
 #include <testHelpers.hpp>
 
+// This makes the macros cleaner
 using namespace std;
+using std::abs;
 using namespace af;
 
 const int num = 10000;
@@ -22,6 +24,9 @@ const int num = 10000;
 #define sub(left, right) (left) - (right)
 #define mul(left, right) (left) * (right)
 #define div(left, right) (left) / (right)
+
+typedef std::complex<float> complex_float;
+typedef std::complex<double> complex_double;
 
 template<typename T> T mod(T a, T b)
 {
@@ -34,6 +39,8 @@ af::array randgen(const int num, af::dtype ty)
     tmp.eval();
     return tmp;
 }
+
+#define MY_ASSERT_NEAR(aa, bb, cc) ASSERT_NEAR(abs(aa), abs(bb), (cc))
 
 #define BINARY_TESTS(Ta, Tb, Tc, func)                                  \
     TEST(BinaryTests, Test_##func##_##Ta##_##Tb)                        \
@@ -68,7 +75,7 @@ af::array randgen(const int num, af::dtype ty)
         Tb h_b = 3.0;                                                   \
         af::array c = func(a, h_b);                                     \
         Ta *h_a = a.host<Ta>();                                         \
-        Tc *h_c = c.host<Tc>();                                         \
+        Ta *h_c = c.host<Ta>();                                         \
         for (int i = 0; i < num; i++)                                   \
             ASSERT_EQ(h_c[i], func(h_a[i], h_b)) <<                     \
                 "for values: " << h_a[i]  << "," << h_b << std::endl;   \
@@ -95,8 +102,8 @@ af::array randgen(const int num, af::dtype ty)
     }                                                                   \
 
 
-#define BINARY_TESTS_NEAR(Ta, Tb, Tc, func, err)                        \
-    TEST(BinaryTests, Test_##func##_##Ta##_##Tb)                        \
+#define BINARY_TESTS_NEAR_GENERAL(Ta, Tb, Tc, Td, Te,func, err)         \
+    TEST(BinaryTestsFloating, Test_##func##_##Ta##_##Tb)                \
     {                                                                   \
         if (noDoubleTests<Ta>()) return;                                \
         if (noDoubleTests<Tb>()) return;                                \
@@ -111,14 +118,14 @@ af::array randgen(const int num, af::dtype ty)
         Tb *h_b = b.host<Tb>();                                         \
         Tc *h_c = c.host<Tc>();                                         \
         for (int i = 0; i < num; i++)                                   \
-            ASSERT_NEAR(h_c[i], func(h_a[i], h_b[i]), err) <<           \
+            MY_ASSERT_NEAR(h_c[i], func(h_a[i], h_b[i]), (err)) <<      \
                 "for values: " << h_a[i]  << "," << h_b[i] << std::endl; \
         delete[] h_a;                                                   \
         delete[] h_b;                                                   \
         delete[] h_c;                                                   \
     }                                                                   \
                                                                         \
-    TEST(BinaryTests, Test_##func##_##Ta##_##Tb##_left)                 \
+    TEST(BinaryTestsFloating, Test_##func##_##Ta##_##Tb##_left)         \
     {                                                                   \
         if (noDoubleTests<Ta>()) return;                                \
         if (noDoubleTests<Tb>()) return;                                \
@@ -128,15 +135,15 @@ af::array randgen(const int num, af::dtype ty)
         Tb h_b = 0.3;                                                   \
         af::array c = func(a, h_b);                                     \
         Ta *h_a = a.host<Ta>();                                         \
-        Ta *h_c = c.host<Ta>();                                         \
+        Td *h_d = c.host<Td>();                                         \
         for (int i = 0; i < num; i++)                                   \
-            ASSERT_NEAR(h_c[i], func(h_a[i], h_b), err) <<              \
+            MY_ASSERT_NEAR(h_d[i], func(h_a[i], h_b), err) <<           \
                 "for values: " << h_a[i]  << "," << h_b << std::endl;   \
         delete[] h_a;                                                   \
-        delete[] h_c;                                                   \
+        delete[] h_d;                                                   \
     }                                                                   \
                                                                         \
-    TEST(BinaryTests, Test_##func##_##Ta##_##Tb##_right)                \
+    TEST(BinaryTestsFloating, Test_##func##_##Ta##_##Tb##_right)        \
     {                                                                   \
         if (noDoubleTests<Ta>()) return;                                \
         if (noDoubleTests<Tb>()) return;                                \
@@ -147,13 +154,15 @@ af::array randgen(const int num, af::dtype ty)
         af::array b = randgen(num, tb);                                 \
         af::array c = func(h_a, b);                                     \
         Tb *h_b = b.host<Tb>();                                         \
-        Tb *h_c = c.host<Tb>();                                         \
+        Te *h_e = c.host<Te>();                                         \
         for (int i = 0; i < num; i++)                                   \
-            ASSERT_NEAR(h_c[i], func(h_a, h_b[i]), err) <<              \
+            MY_ASSERT_NEAR(h_e[i], func(h_a, h_b[i]), err) <<           \
                 "for values: " << h_a  << "," << h_b[i] << std::endl;   \
         delete[] h_b;                                                   \
-        delete[] h_c;                                                   \
+        delete[] h_e;                                                   \
     }                                                                   \
+
+#define BINARY_TESTS_NEAR(Ta, Tb, Tc, func, err) BINARY_TESTS_NEAR_GENERAL(Ta, Tb, Tc, Ta, Tc, func, err)
 
 #define BINARY_TESTS_FLOAT(func) BINARY_TESTS(float, float, float, func)
 #define BINARY_TESTS_DOUBLE(func) BINARY_TESTS(double, double, double, func)
@@ -219,6 +228,27 @@ BINARY_TESTS_NEAR(float, double, double, sub, 1e-5)
 BINARY_TESTS_NEAR(float, double, double, mul, 1e-5)
 BINARY_TESTS_NEAR(float, double, double, div, 1e-5)
 
+BINARY_TESTS_NEAR(cfloat, cdouble, cdouble, add, 1e-5)
+BINARY_TESTS_NEAR(cfloat, cdouble, cdouble, sub, 1e-5)
+BINARY_TESTS_NEAR(cfloat, cdouble, cdouble, mul, 1e-5)
+BINARY_TESTS_NEAR(cfloat, cdouble, cdouble, div, 1e-5)
+
+BINARY_TESTS_NEAR_GENERAL(float, cfloat, cfloat, cfloat, cfloat, add, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(float, cfloat, cfloat, cfloat, cfloat, sub, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(float, cfloat, cfloat, cfloat, cfloat, mul, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(float, cfloat, cfloat, cfloat, cfloat, div, 1e-5)
+
+BINARY_TESTS_NEAR_GENERAL(double, cfloat, cdouble, cdouble, cfloat, add, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(double, cfloat, cdouble, cdouble, cfloat, sub, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(double, cfloat, cdouble, cdouble, cfloat, mul, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(double, cfloat, cdouble, cdouble, cfloat, div, 1e-5)
+
+BINARY_TESTS_NEAR_GENERAL(cfloat, double, cdouble, cfloat, cdouble, add, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(cfloat, double, cdouble, cfloat, cdouble, sub, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(cfloat, double, cdouble, cfloat, cdouble, mul, 1e-5)
+BINARY_TESTS_NEAR_GENERAL(cfloat, double, cdouble, cfloat, cdouble, div, 1e-5)
+
+
 #define BITOP(func, T, op)                                  \
     TEST(BinaryTests, Test_##func##_##T)                    \
     {                                                       \
@@ -263,3 +293,46 @@ BITOP(bitand, uintl, &)
 BITOP(bitxor, uintl, ^)
 BITOP(bitshiftl, uintl, <<)
 BITOP(bitshiftr, uintl, >>)
+
+TEST(BinaryTests, Test_pow_cfloat_float)
+{
+    af::array a = randgen(num, c32);
+    af::array b = randgen(num, f32);
+    af::array c = af::pow(a, b);
+    complex_float *h_a = (complex_float *)a.host<cfloat>();
+    float *h_b = b.host<float>();
+    complex_float *h_c = (complex_float *)c.host<cfloat>();
+    for (int i = 0; i < num; i++) {
+        complex_float res = std::pow(h_a[i], h_b[i]);
+        ASSERT_NEAR(real(h_c[i]), real(res), 1E-5)
+            << "for real values of: " << h_a[i]  << "," << h_b[i] << std::endl;
+        ASSERT_NEAR(imag(h_c[i]), imag(res), 1E-5)
+            << "for imag values of: " << h_a[i]  << "," << h_b[i] << std::endl;
+
+    }
+    delete[] h_a;
+    delete[] h_b;
+    delete[] h_c;
+}
+
+TEST(BinaryTests, Test_pow_cdouble_cdouble)
+{
+    if (noDoubleTests<cdouble>()) return;
+    af::array a = randgen(num, c64);
+    af::array b = randgen(num, c64);
+    af::array c = af::pow(a, b);
+    complex_double *h_a = (complex_double *)a.host<cdouble>();
+    complex_double *h_b = (complex_double *)b.host<cdouble>();
+    complex_double *h_c = (complex_double *)c.host<cdouble>();
+    for (int i = 0; i < num; i++) {
+        complex_double res = std::pow(h_a[i], h_b[i]);
+        ASSERT_NEAR(real(h_c[i]), real(res), 1E-10)
+            << "for real values of: " << h_a[i]  << "," << h_b[i] << std::endl;
+        ASSERT_NEAR(imag(h_c[i]), imag(res), 1E-10)
+            << "for imag values of: " << h_a[i]  << "," << h_b[i] << std::endl;
+
+    }
+    delete[] h_a;
+    delete[] h_b;
+    delete[] h_c;
+}

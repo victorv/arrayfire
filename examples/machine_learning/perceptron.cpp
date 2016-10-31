@@ -26,12 +26,6 @@ float accuracy(const array& predicted, const array& target)
     return 100 * count<float>(plabels == tlabels) / tlabels.elements();
 }
 
-// Activation function
-array sigmoid(const array &val)
-{
-    return 1 / (1 + exp(-val));
-}
-
 // Predict based on given parameters
 array predict(const array &X, const array &Weights)
 {
@@ -149,4 +143,5 @@ int main(int argc, char** argv)
         std::cerr << ae.what() << std::endl;
     }
 
+    return 0;
 }

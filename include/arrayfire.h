@@ -39,7 +39,7 @@
       @defgroup data_mat Functions to create arrays.
       constant, random, range, etc.
 
-      @defgroup index_mat Indexing operation on arrays
+      @defgroup index_mat Assignment & Indexing operation on arrays
       Access sub regions of an array object
 
       @defgroup manip_mat Move and Reorder array content
@@ -100,7 +100,7 @@
    @defgroup linalg_mat Linear Algebra
    @{
 
-     Matrix multiply, solve, decompositions
+     Matrix multiply, solve, decompositions, sparse matrix
 
      @defgroup blas_mat BLAS operations
      Matrix multiply, dot product, etc.
@@ -113,6 +113,49 @@
 
      @defgroup lapack_ops_mat Matrix operations
      inverse, det, rank, norm etc.
+
+     @defgroup lapack_helper LAPACK Helper functions
+
+     @defgroup sparse_func Sparse functions
+        \brief Functions to create and handle sparse arrays and matrix operations
+
+        Sparse array in ArrayFire use the same \ref af::array (or \ref af_array)
+        handle as normal. Internally, this handle is used to maintain a structure
+        of the sparse array (components listed below).
+
+        Description     | Data Type
+        ----------------|-------------------
+        Values          | T (one of \ref f32, \ref f64, \ref c32, \ref c64)
+        Row Indices     | Int (\ref s32)
+        Column Indices  | Int (\ref s32)
+        Storage         | \ref af::storage
+
+        The value array contains the non-zero elements of the matrix. The
+        \ref af::dtype of the value array is the same as that of the matrix.
+        The size of this array is the same as the number of non-zero elements
+        of the matrix.
+
+        The row indices and column indices contain the indices based on
+        \ref af::storage type. These \ref af::array are always of type \ref s32.
+
+        The \ref af::storage is used to determin the type of storage to use.
+        Currently \ref AF_STORAGE_CSR and \ref AF_STORAGE_COO are available.
+
+        A sparse array can be identied using the \ref af::array::issparse()
+        function.  This function will return true for a sparse array and false
+        for a regular \ref af::array.
+
+        The valid operations on sparse arrays are \ref af::matmul (sparse-dense).
+        When calling matmul for sparse matrices, the sparse array is required to
+        be the left hand side matrix and can be used with transposing options.
+        The dense matrix on the right hand side cannot be used with any transpose
+        options.
+
+        Most functions cannot use sparse arrays and will throw an error with
+        \ref AF_ERR_ARG if a sparse array is given as input.
+
+        \note Sparse functionality support was added to ArrayFire in v3.4.0.
+
    @}
 
    @defgroup image_mat Image Processing
@@ -126,6 +169,9 @@
      @defgroup hist_mat Histograms
      Image and data histograms
 
+     @defgroup moments_mat Image moments
+     Centroids, areas, etc.
+
      @defgroup transform_mat Image transformations
      rotate, skew, etc.
 
@@ -137,6 +183,9 @@
 
      @defgroup connected_comps_mat Connected Components & Labeling
      regions
+
+     @defgroup image_mod_mat Wrapping and unwrapping image windows
+     wrap, unwrap, etc.
 
      @defgroup utility_mat Utility Functions
      loadImage, saveImage, gaussianKernel
@@ -197,10 +246,26 @@
      Reading and writing images
    @}
 
+   @defgroup unified_func Unified API Functions
+   @{
+
+     Functions to set current backend and utilities
+
+   @}
+
+   @defgroup internal_func Functions to work with internal array layout
+   @{
+
+     Functions to work with arrayfire's internal data structure.
+
+     Note: The behavior of these functions is not promised to be consistent across versions.
+
+   @}
+
    @defgroup external Interface Functions
    @{
 
-     CUDA/OpenCL specific functions
+     Backend specific functions
 
      @defgroup opencl_mat OpenCL specific functions
 
@@ -216,47 +281,25 @@
         upload data to `cl_mem` objects from separate threads, but the thread which
         instantiated ArrayFire must do the `cl_mem` to \ref af::array conversion.
 
+     @defgroup cuda_mat CUDA specific functions
+
+        \brief Accessing ArrayFire's stream, and native device id with other CUDA code.
+
+        If your software is using ArrayFire's CUDA backend, you can also write custom
+        kernels and do custom memory operations using native CUDA commands. The functions
+        contained in the \p afcu namespace provide methods to get the stream and native
+        device id that ArrayFire is using.
    @}
 @}
 
 
 */
 
-/**
-\example helloworld.cpp
-\example pi.cpp
-\example integer.cpp
-\example rainfall.cpp
-\example vectorize.cpp
-\example black_scholes_options.cpp
-\example monte_carlo_options.cpp
-\example harris.cpp
-\example kmeans.cpp
-\example knn.cpp
-\example bagging.cpp
-\example naive_bayes.cpp
-\example perceptron.cpp
-\example neural_network.cpp
-\example rbm.cpp
-\example deep_belief_net.cpp
-\example logistic_regression.cpp
-\example conway.cpp
-\example conway_pretty.cpp
-\example fractal.cpp
-\example histogram.cpp
-\example plot2d.cpp
-\example brain_segmentation.cpp
-\example image_demo.cpp
-\example morphing.cpp
-\example optical_flow.cpp
-\example pyramids.cpp
-\example edge.cpp
-*/
-
 #include "af/compatible.h"
 #include "af/algorithm.h"
 #include "af/arith.h"
 #include "af/array.h"
+#include "af/backend.h"
 #include "af/blas.h"
 #include "af/constants.h"
 #include "af/complex.h"
@@ -269,8 +312,10 @@
 #include "af/image.h"
 #include "af/index.h"
 #include "af/lapack.h"
+#include "af/random.h"
 #include "af/seq.h"
 #include "af/signal.h"
+#include "af/sparse.h"
 #include "af/statistics.h"
 #include "af/timing.h"
 #include "af/util.h"

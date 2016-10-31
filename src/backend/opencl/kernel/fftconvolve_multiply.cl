@@ -23,7 +23,7 @@ void complex_multiply(
     if (t >= nelem)
         return;
 
-    if (kind == ONE2ONE || kind == MANY2MANY) {
+    if (kind == AF_BATCH_NONE || kind == AF_BATCH_SAME) {
         // Complex multiply each signal to equivalent filter
         const int ridx = t * 2;
         const int iidx = t * 2 + 1;
@@ -39,7 +39,7 @@ void complex_multiply(
         d_out[oInfo.offset + ridx] = ac - bd;
         d_out[oInfo.offset + iidx] = (a+b) * (c+d) - ac - bd;
     }
-    else if (kind == MANY2ONE) {
+    else if (kind == AF_BATCH_LHS) {
         // Complex multiply all signals to filter
         const int ridx1 = t * 2;
         const int iidx1 = t * 2 + 1;
@@ -60,7 +60,7 @@ void complex_multiply(
         d_out[oInfo.offset + ridx1] = ac - bd;
         d_out[oInfo.offset + iidx1] = (a+b) * (c+d) - ac - bd;
     }
-    else if (kind == ONE2MANY) {
+    else if (kind == AF_BATCH_RHS) {
         // Complex multiply signal to all filters
         const int ridx2 = t * 2;
         const int iidx2 = t * 2 + 1;

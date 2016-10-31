@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -77,7 +76,7 @@ void index(Param<T> out, CParam<T> in, const IndexKernelParam_t& p)
 
     dim3 blocks(blks_x*out.dims[2], blks_y*out.dims[3]);
 
-    indexKernel<T> <<<blocks, threads>>> (out, in, p, blks_x, blks_y);
+    CUDA_LAUNCH((indexKernel<T>), blocks, threads, out, in, p, blks_x, blks_y);
 
     POST_LAUNCH_CHECK();
 }

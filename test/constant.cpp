@@ -19,7 +19,7 @@ using std::vector;
 template<typename T>
 class Constant : public ::testing::Test { };
 
-typedef ::testing::Types<float, af::cfloat, double, af::cdouble, int, unsigned, char, uchar, uintl, intl> TestTypes;
+typedef ::testing::Types<float, af::cfloat, double, af::cdouble, int, unsigned, char, uchar, uintl, intl, short, ushort> TestTypes;
 TYPED_TEST_CASE(Constant, TestTypes);
 
 template<typename T>
@@ -130,10 +130,10 @@ void IdentityCPPError() {
         array out = af::identity(num, 0, 10, dty);
     }
     catch(const af::exception &ex) {
-        SUCCEED();
+        FAIL() << "Incorrectly thrown 0-length exception";
         return;
     }
-    FAIL() << "Failed to throw an exception";
+    SUCCEED();
 }
 
 TYPED_TEST(Constant, basicCPP)

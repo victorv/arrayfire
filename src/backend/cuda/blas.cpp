@@ -18,6 +18,9 @@
 #include <math.hpp>
 #include <err_common.hpp>
 #include <cublasManager.hpp>
+#include <arith.hpp>
+#include <reduce.hpp>
+#include <complex.hpp>
 
 namespace cuda
 {
@@ -60,16 +63,6 @@ struct gemv_func_def_t
 };
 
 template<typename T>
-struct dot_func_def_t
-{
-    typedef cublasStatus_t (*dot_func_def)(    cublasHandle_t,
-                                                int,
-                                                const T *,  int,
-                                                const T *,  int,
-                                                T *);
-};
-
-template<typename T>
 struct trsm_func_def_t
 {
     typedef cublasStatus_t (*trsm_func_def)(    cublasHandle_t,
@@ -103,15 +96,54 @@ BLAS_FUNC(gemv, cfloat, C)
 BLAS_FUNC(gemv, double, D)
 BLAS_FUNC(gemv, cdouble,Z)
 
-BLAS_FUNC_DEF(dot)
-BLAS_FUNC(dot, float,  S)
-BLAS_FUNC(dot, double, D)
-
 BLAS_FUNC_DEF(trsm)
 BLAS_FUNC(trsm, float,  S)
 BLAS_FUNC(trsm, cfloat, C)
 BLAS_FUNC(trsm, double, D)
 BLAS_FUNC(trsm, cdouble,Z)
+
+#undef BLAS_FUNC
+#undef BLAS_FUNC_DEF
+
+template<typename T, bool conjugate>
+struct dot_func_def_t
+{
+    typedef cublasStatus_t (*dot_func_def)(    cublasHandle_t,
+                                                int,
+                                                const T *,  int,
+                                                const T *,  int,
+                                                T *);
+};
+
+#define BLAS_FUNC_DEF( FUNC )                                   \
+template<typename T, bool conjugate>                            \
+typename FUNC##_func_def_t<T, conjugate>::FUNC##_func_def       \
+FUNC##_func();
+
+#define BLAS_FUNC( FUNC, TYPE, CONJUGATE, PREFIX )                           \
+template<> typename FUNC##_func_def_t<TYPE, CONJUGATE>::FUNC##_func_def      \
+FUNC##_func<TYPE, CONJUGATE>()  { return (FUNC##_func_def_t<TYPE, CONJUGATE>::FUNC##_func_def)&cublas##PREFIX##FUNC; }
+
+BLAS_FUNC_DEF(dot)
+BLAS_FUNC(dot, float,  true,  S)
+BLAS_FUNC(dot, double, true,  D)
+BLAS_FUNC(dot, float,  false, S)
+BLAS_FUNC(dot, double, false, D)
+
+#undef BLAS_FUNC
+
+#define BLAS_FUNC( FUNC, TYPE, CONJUGATE, PREFIX, SUFFIX)                \
+template<> typename FUNC##_func_def_t<TYPE, CONJUGATE>::FUNC##_func_def  \
+FUNC##_func<TYPE, CONJUGATE>()  { return (FUNC##_func_def_t<TYPE, CONJUGATE>::FUNC##_func_def)&cublas##PREFIX##FUNC##SUFFIX; }
+
+BLAS_FUNC_DEF(dot)
+BLAS_FUNC(dot, cfloat,  true , C, c)
+BLAS_FUNC(dot, cdouble, true , Z, c)
+BLAS_FUNC(dot, cfloat,  false, C, u)
+BLAS_FUNC(dot, cdouble, false, Z, u)
+
+#undef BLAS_FUNC
+#undef BLAS_FUNC_DEF
 
 using namespace std;
 
@@ -172,17 +204,11 @@ template<typename T>
 Array<T> dot(const Array<T> &lhs, const Array<T> &rhs,
              af_mat_prop optLhs, af_mat_prop optRhs)
 {
-    int N = lhs.dims()[0];
+    const Array<T> lhs_ = (optLhs == AF_MAT_NONE ? lhs : conj<T>(lhs));
+    const Array<T> rhs_ = (optRhs == AF_MAT_NONE ? rhs : conj<T>(rhs));
 
-    T out;
-
-    CUBLAS_CHECK(dot_func<T>()(getHandle(),
-                               N,
-                               lhs.get(), lhs.strides()[0],
-                               rhs.get(), rhs.strides()[0],
-                               &out));
-
-    return createValueArray(af::dim4(1), out);
+    const Array<T> temp = arithOp<T, af_mul_t>(lhs_, rhs_, lhs_.dims());
+    return reduce<af_add_t, T, T>(temp, 0, false, 0);
 }
 
 template<typename T>
@@ -213,7 +239,7 @@ void trsm(const Array<T> &lhs, Array<T> &rhs, af_mat_prop trans,
 
 
 #define INSTANTIATE_BLAS(TYPE)                                                          \
-    template Array<TYPE> matmul<TYPE>(const Array<TYPE> &lhs, const Array<TYPE> &rhs,  \
+    template Array<TYPE> matmul<TYPE>(const Array<TYPE> &lhs, const Array<TYPE> &rhs,   \
                                       af_mat_prop optLhs, af_mat_prop optRhs);
 
 INSTANTIATE_BLAS(float)
@@ -221,12 +247,14 @@ INSTANTIATE_BLAS(cfloat)
 INSTANTIATE_BLAS(double)
 INSTANTIATE_BLAS(cdouble)
 
-#define INSTANTIATE_DOT(TYPE)                                                       \
-    template Array<TYPE> dot<TYPE>(const Array<TYPE> &lhs, const Array<TYPE> &rhs, \
+#define INSTANTIATE_DOT(TYPE)                                                           \
+    template Array<TYPE> dot<TYPE>(const Array<TYPE> &lhs, const Array<TYPE> &rhs,      \
                                    af_mat_prop optLhs, af_mat_prop optRhs);
 
 INSTANTIATE_DOT(float)
 INSTANTIATE_DOT(double)
+INSTANTIATE_DOT(cfloat)
+INSTANTIATE_DOT(cdouble)
 
 #define INSTANTIATE_TRSM(TYPE)                                                          \
     template void trsm<TYPE>(const Array<TYPE> &lhs, Array<TYPE> &rhs,                  \

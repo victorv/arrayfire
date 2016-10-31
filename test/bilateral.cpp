@@ -18,12 +18,14 @@
 
 using std::string;
 using std::vector;
+using std::abs;
 using af::dim4;
 
 template<typename T, bool isColor>
 void bilateralTest(string pTestFile)
 {
     if (noDoubleTests<T>()) return;
+    if (noImageIOTests()) return;
 
     vector<dim4>       inDims;
     vector<string>    inFiles;
@@ -80,7 +82,7 @@ class BilateralOnData : public ::testing::Test
 {
 };
 
-typedef ::testing::Types<float, double, int, uint, char, uchar> DataTestTypes;
+typedef ::testing::Types<float, double, int, uint, char, uchar, short, ushort> DataTestTypes;
 
 // register the type list
 TYPED_TEST_CASE(BilateralOnData, DataTestTypes);

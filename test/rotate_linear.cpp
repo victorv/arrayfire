@@ -20,11 +20,12 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
 template<typename T>
-class Rotate : public ::testing::Test
+class RotateLinear : public ::testing::Test
 {
     public:
         virtual void SetUp() {
@@ -36,10 +37,10 @@ class Rotate : public ::testing::Test
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<float, double, cfloat, cdouble, int, intl, char> TestTypes;
+typedef ::testing::Types<float, double, cfloat, cdouble, int, intl, char, short> TestTypes;
 
 // register the type list
-TYPED_TEST_CASE(Rotate, TestTypes);
+TYPED_TEST_CASE(RotateLinear, TestTypes);
 
 #define PI 3.1415926535897931f
 
@@ -107,10 +108,10 @@ void rotateTest(string pTestFile, const unsigned resultIdx, const float angle, c
     if(tempArray != 0) af_release_array(tempArray);
 }
 
-#define ROTATE_INIT(desc, file, resultIdx, angle, crop, recenter)                               \
-    TYPED_TEST(Rotate, desc)                                                                    \
-    {                                                                                           \
-        rotateTest<TypeParam>(string(TEST_DIR"/rotate/"#file".test"), resultIdx, angle, crop, recenter);\
+#define ROTATE_INIT(desc, file, resultIdx, angle, crop, recenter)       \
+    TYPED_TEST(RotateLinear, desc)                                      \
+    {                                                                   \
+        rotateTest<TypeParam>(string(TEST_DIR"/rotate/"#file".test"), resultIdx, angle, crop, recenter); \
     }
 
     ROTATE_INIT(Square180NoCropRecenter     , rotatelinear1,  0, 180, false, true);
@@ -165,7 +166,7 @@ void rotateTest(string pTestFile, const unsigned resultIdx, const float angle, c
 
 ////////////////////////////////// CPP //////////////////////////////////////
 
-TEST(Rotate, CPP)
+TEST(RotateLinear, CPP)
 {
     if (noDoubleTests<float>()) return;
 

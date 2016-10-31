@@ -22,25 +22,29 @@ namespace opencl
         Array<T> out = createEmptyArray<T>(odims);
 
         switch(method) {
-            case AF_INTERP_NEAREST:
-                kernel::rotate<T, AF_INTERP_NEAREST> (out, in, theta);
-                break;
-            case AF_INTERP_BILINEAR:
-                kernel::rotate<T, AF_INTERP_BILINEAR> (out, in, theta);
-                break;
-            default:
-                AF_ERROR("Unsupported interpolation type", AF_ERR_ARG);
-                break;
+        case AF_INTERP_NEAREST:
+        case AF_INTERP_LOWER:
+            kernel::rotate<T, 1>(out, in, theta, method);
+            break;
+        case AF_INTERP_BILINEAR:
+        case AF_INTERP_BILINEAR_COSINE:
+            kernel::rotate<T, 2>(out, in, theta, method);
+            break;
+        case AF_INTERP_BICUBIC:
+        case AF_INTERP_BICUBIC_SPLINE:
+            kernel::rotate<T, 3>(out, in, theta, method);
+            break;
+        default:
+            AF_ERROR("Unsupported interpolation type", AF_ERR_ARG);
         }
 
         return out;
     }
 
 
-#define INSTANTIATE(T)                                                  \
-    template Array<T> rotate(const Array<T> &in, const float theta,     \
-                             const af::dim4 &odims, const af_interp_type method); \
-
+#define INSTANTIATE(T)                                                              \
+    template Array<T> rotate(const Array<T> &in, const float theta,                 \
+                             const af::dim4 &odims, const af_interp_type method);
 
     INSTANTIATE(float)
     INSTANTIATE(double)
@@ -52,4 +56,6 @@ namespace opencl
     INSTANTIATE(uintl)
     INSTANTIATE(uchar)
     INSTANTIATE(char)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
 }

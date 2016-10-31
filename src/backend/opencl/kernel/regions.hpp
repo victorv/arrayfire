@@ -19,6 +19,9 @@
 #include <map>
 #include <memory.hpp>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include <boost/compute/container/vector.hpp>
 #include <boost/compute/algorithm/adjacent_difference.hpp>
 #include <boost/compute/algorithm/sort.hpp>
@@ -28,9 +31,12 @@
 #include <boost/compute/lambda/placeholders.hpp>
 #include <boost/compute/lambda.hpp>
 
+#pragma GCC diagnostic pop
+
 using cl::Buffer;
 using cl::Program;
 using cl::Kernel;
+using cl::KernelFunctor;
 using cl::EnqueueArgs;
 using cl::NDRange;
 namespace compute = boost::compute;
@@ -55,19 +61,18 @@ void regions(Param out, Param in)
         static std::map<int, Kernel *>     ueKernel;
 
         int device = getActiveDeviceId();
-
         static const int block_dim = 16;
         static const int num_warps = 8;
 
         std::call_once( compileFlags[device], [device] () {
-
+                ToNumStr<T> toNumStr;
                 std::ostringstream options;
                 if (full_conn) {
                     options << " -D T=" << dtype_traits<T>::getName()
                             << " -D BLOCK_DIM=" << block_dim
                             << " -D NUM_WARPS=" << num_warps
                             << " -D N_PER_THREAD=" << n_per_thread
-                            << " -D LIMIT_MAX=" << limit_max<T>()
+                            << " -D LIMIT_MAX=" << toNumStr(maxval<T>())
                             << " -D FULL_CONN";
                 }
                 else {
@@ -75,7 +80,7 @@ void regions(Param out, Param in)
                             << " -D BLOCK_DIM=" << block_dim
                             << " -D NUM_WARPS=" << num_warps
                             << " -D N_PER_THREAD=" << n_per_thread
-                            << " -D LIMIT_MAX=" << limit_max<T>();
+                            << " -D LIMIT_MAX=" << toNumStr(maxval<T>());
                 }
                 if (std::is_same<T, double>::value ||
                     std::is_same<T, cdouble>::value) {
@@ -98,7 +103,7 @@ void regions(Param out, Param in)
 
         const NDRange global(blk_x * THREADS_X, blk_y * THREADS_Y);
 
-        auto ilOp = make_kernel<Buffer, KParam,
+        auto ilOp = KernelFunctor<Buffer, KParam,
                                 Buffer, KParam> (*ilKernel[device]);
 
         ilOp(EnqueueArgs(getQueue(), global, local),
@@ -113,7 +118,7 @@ void regions(Param out, Param in)
             h_continue = 0;
             getQueue().enqueueWriteBuffer(*d_continue, CL_TRUE, 0, sizeof(int), &h_continue);
 
-            auto ueOp = make_kernel<Buffer, KParam,
+            auto ueOp = KernelFunctor<Buffer, KParam,
                                     Buffer> (*ueKernel[device]);
 
             ueOp(EnqueueArgs(getQueue(), global, local),
@@ -199,7 +204,7 @@ void regions(Param out, Param in)
                                 c_queue);
 
         // Apply the correct labels to the equivalency map
-        auto frOp = make_kernel<Buffer, KParam,
+        auto frOp = KernelFunctor<Buffer, KParam,
                                 Buffer, KParam,
                                 Buffer> (*frKernel[device]);
 

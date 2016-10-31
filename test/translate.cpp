@@ -20,6 +20,7 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -41,7 +42,7 @@ class TranslateInt : public ::testing::Test
 
 // create a list of types to be tested
 typedef ::testing::Types<float, double, cfloat, cdouble> TestTypes;
-typedef ::testing::Types<int, intl, char> TestTypesInt;
+typedef ::testing::Types<int, intl, char, short> TestTypesInt;
 
 // register the type list
 TYPED_TEST_CASE(Translate, TestTypes);

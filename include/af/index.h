@@ -103,6 +103,17 @@ class AFAPI index {
     ///
     index(const af::array& idx0);
 
+#if AF_API_VERSION >= 31
+    ///
+    /// \brief Copy constructor
+    ///
+    /// \param[in] idx0 is index to copy.
+    ///
+    /// \sa indexing
+    ///
+    index(const index& idx0);
+#endif
+
     ///
     /// \brief Returns true if the \ref af::index represents a af::span object
     ///
@@ -116,6 +127,33 @@ class AFAPI index {
     /// \returns the af_index_t represented by this object
     ///
     const af_index_t& get() const;
+
+#if AF_API_VERSION >= 31
+    ///
+    /// \brief Assigns idx0 to this index
+    ///
+    /// \param[in] idx0 is the index to be assigned to the /ref af::index
+    /// \returns the reference to this
+    ///
+    ///
+    index & operator=(const index& idx0);
+
+#if __cplusplus > 199711L
+    ///
+    /// \brief Move constructor
+    ///
+    /// \param[in] idx0 is index to copy.
+    ///
+    index(index &&idx0);
+    ///
+    /// \brief Move assignment operator
+    ///
+    /// \param[in] idx0 is the index to be assigned to the /ref af::index
+    /// \returns a reference to this
+    ///
+    index& operator=(index &&idx0);
+#endif
+#endif // AF_API_VERSION
 };
 
 ///
@@ -130,6 +168,26 @@ class AFAPI index {
 ///
 
 AFAPI array lookup(const array &in, const array &idx, const int dim = -1);
+
+#if AF_API_VERSION >= 31
+///
+/// Copy the values of an input array based on index
+///
+/// \param[out] dst The destination array
+/// \param[in] src The source array
+/// \param[in] idx0 The first index
+/// \param[in] idx1 The second index (defaults to \ref af::span)
+/// \param[in] idx2 The third index (defaults to \ref af::span)
+/// \param[in] idx3 The fourth index (defaults to \ref af::span)
+/// \ingroup index_func_index
+///
+
+AFAPI void copy(array &dst, const array &src,
+                const index &idx0,
+                const index &idx1 = span,
+                const index &idx2 = span,
+                const index &idx3 = span);
+#endif
 
 }
 #endif
@@ -224,12 +282,99 @@ extern "C" {
     /// \param[in] indices  is an af_array of \ref af_index_t objects
     /// \param[in] rhs      is the array whose values will be assigned to \p lhs
     ///
-    /// \ingroup index_func_index
+    /// \ingroup index_func_assign
     ///
     AFAPI af_err af_assign_gen( af_array *out,
                                 const af_array lhs,
                                 const dim_t ndims, const af_index_t* indices,
                                 const af_array rhs);
+
+#if AF_API_VERSION >= 32
+    ///
+    /// \brief Create an quadruple of af_index_t array
+    ///
+    /// \snippet test/index.cpp ex_index_util_0
+    ///
+    /// \param[out] indexers pointer to location where quadruple af_index_t array is created
+    /// \returns \ref af_err error code
+    ///
+    /// \ingroup index_func_index
+    ///
+    AFAPI af_err af_create_indexers(af_index_t** indexers);
+#endif
+
+#if AF_API_VERSION >= 32
+    ///
+    /// \brief set \p dim to given indexer af_array \p idx
+    ///
+    /// \snippet test/index.cpp ex_index_util_0
+    ///
+    /// \param[in] indexer pointer to location where quadruple af_index_t array was created
+    /// \param[in] idx is the af_array indexer for given dimension \p dim
+    /// \param[in] dim is the dimension to be indexed
+    /// \returns \ref af_err error code
+    ///
+    /// \ingroup index_func_index
+    ///
+    AFAPI af_err af_set_array_indexer(af_index_t* indexer, const af_array idx, const dim_t dim);
+#endif
+
+#if AF_API_VERSION >= 32
+    ///
+    /// \brief set \p dim to given indexer af_array \p idx
+    ///
+    /// This function is similar to \ref af_set_array_indexer in terms of functionality except
+    /// that this version accepts object of type \ref af_seq instead of \ref af_array.
+    ///
+    /// \snippet test/index.cpp ex_index_util_0
+    ///
+    /// \param[in] indexer pointer to location where quadruple af_index_t array was created
+    /// \param[in] idx is the af_seq indexer for given dimension \p dim
+    /// \param[in] dim is the dimension to be indexed
+    /// \param[in] is_batch indicates if the sequence based indexing is inside a batch operation
+    ///
+    /// \ingroup index_func_index
+    ///
+    AFAPI af_err af_set_seq_indexer(af_index_t* indexer, const af_seq* idx,
+                                  const dim_t dim, const bool is_batch);
+#endif
+
+#if AF_API_VERSION >= 32
+    ///
+    /// \brief set \p dim to given indexer af_array \p idx
+    ///
+    ///  This function is alternative to \ref af_set_seq_indexer where instead of passing
+    ///  in an already prepared \ref af_seq object, you pass the arguments necessary for
+    ///  creating an af_seq directly.
+    ///
+    /// \param[in] indexer pointer to location where quadruple af_index_t array was created
+    /// \param[in] begin is the beginning index of along dimension \p dim
+    /// \param[in] end is the beginning index of along dimension \p dim
+    /// \param[in] step size along dimension \p dim
+    /// \param[in] dim is the dimension to be indexed
+    /// \param[in] is_batch indicates if the sequence based indexing is inside a batch operation
+    /// \returns \ref af_err error code
+    ///
+    /// \ingroup index_func_index
+    ///
+    AFAPI af_err af_set_seq_param_indexer(af_index_t* indexer,
+                                        const double begin, const double end, const double step,
+                                        const dim_t dim, const bool is_batch);
+#endif
+
+#if AF_API_VERSION >= 32
+    ///
+    /// \brief Release's the memory resource used by the quadruple af_index_t array
+    ///
+    /// \snippet test/index.cpp ex_index_util_0
+    ///
+    /// \param[in] indexers is pointer to location where quadruple af_index_t array is created
+    //  \returns \ref af_err error code
+    ///
+    /// \ingroup index_func_index
+    ///
+    AFAPI af_err af_release_indexers(af_index_t* indexers);
+#endif
 
 #ifdef __cplusplus
 }

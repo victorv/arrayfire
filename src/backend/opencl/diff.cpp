@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
 #include <af/dim4.hpp>
 #include <Array.hpp>
 #include <diff.hpp>
@@ -71,5 +70,9 @@ namespace opencl
     INSTANTIATE(int)
     INSTANTIATE(uint)
     INSTANTIATE(uchar)
+    INSTANTIATE(intl)
+    INSTANTIATE(uintl)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
     INSTANTIATE(char)
 }

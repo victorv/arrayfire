@@ -29,7 +29,14 @@ static inline af_array where(const af_array in)
 af_err af_where(af_array *idx, const af_array in)
 {
     try {
-        af_dtype type = getInfo(in).getType();
+        ArrayInfo i_info = getInfo(in);
+        af_dtype type = i_info.getType();
+
+        if(i_info.ndims() == 0) {
+            dim_t my_dims[] = {0, 0, 0, 0};
+            return af_create_handle(idx, AF_MAX_DIMS, my_dims, u32);
+        }
+
         af_array res;
         switch(type) {
         case f32: res = where<float  >(in); break;
@@ -40,6 +47,8 @@ af_err af_where(af_array *idx, const af_array in)
         case u32: res = where<uint   >(in); break;
         case s64: res = where<intl   >(in); break;
         case u64: res = where<uintl  >(in); break;
+        case s16: res = where<short  >(in); break;
+        case u16: res = where<ushort >(in); break;
         case u8 : res = where<uchar  >(in); break;
         case b8 : res = where<char   >(in); break;
         default:

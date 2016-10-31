@@ -36,13 +36,12 @@ template<af_op_t op>
 static af_err af_arith(af_array *out, const af_array lhs, const af_array rhs, const bool batchMode)
 {
     try {
-        const af_dtype otype = implicit(lhs, rhs);
-
         ArrayInfo linfo = getInfo(lhs);
         ArrayInfo rinfo = getInfo(rhs);
 
         dim4 odims = getOutDims(linfo.dims(), rinfo.dims(), batchMode);
 
+        const af_dtype otype = implicit(linfo.getType(), rinfo.getType());
         af_array res;
         switch (otype) {
         case f32: res = arithOp<float  , op>(lhs, rhs, odims); break;
@@ -55,6 +54,8 @@ static af_err af_arith(af_array *out, const af_array lhs, const af_array rhs, co
         case b8 : res = arithOp<char   , op>(lhs, rhs, odims); break;
         case s64: res = arithOp<intl   , op>(lhs, rhs, odims); break;
         case u64: res = arithOp<uintl  , op>(lhs, rhs, odims); break;
+        case s16: res = arithOp<short  , op>(lhs, rhs, odims); break;
+        case u16: res = arithOp<ushort , op>(lhs, rhs, odims); break;
         default: TYPE_ERROR(0, otype);
         }
 
@@ -68,13 +69,13 @@ template<af_op_t op>
 static af_err af_arith_real(af_array *out, const af_array lhs, const af_array rhs, const bool batchMode)
 {
     try {
-        const af_dtype otype = implicit(lhs, rhs);
 
         ArrayInfo linfo = getInfo(lhs);
         ArrayInfo rinfo = getInfo(rhs);
 
         dim4 odims = getOutDims(linfo.dims(), rinfo.dims(), batchMode);
 
+        const af_dtype otype = implicit(linfo.getType(), rinfo.getType());
         af_array res;
         switch (otype) {
         case f32: res = arithOp<float  , op>(lhs, rhs, odims); break;
@@ -85,6 +86,8 @@ static af_err af_arith_real(af_array *out, const af_array lhs, const af_array rh
         case b8 : res = arithOp<char   , op>(lhs, rhs, odims); break;
         case s64: res = arithOp<intl   , op>(lhs, rhs, odims); break;
         case u64: res = arithOp<uintl  , op>(lhs, rhs, odims); break;
+        case s16: res = arithOp<short  , op>(lhs, rhs, odims); break;
+        case u16: res = arithOp<ushort , op>(lhs, rhs, odims); break;
         default: TYPE_ERROR(0, otype);
         }
 
@@ -140,7 +143,13 @@ af_err af_pow(af_array *out, const af_array lhs, const af_array rhs, const bool 
         ArrayInfo linfo = getInfo(lhs);
         ArrayInfo rinfo = getInfo(rhs);
         if (linfo.isComplex() || rinfo.isComplex()) {
-            AF_ERROR("Powers of Complex numbers not supported", AF_ERR_NOT_SUPPORTED);
+            af_array log_lhs, log_res;
+            af_array res;
+            AF_CHECK(af_log(&log_lhs, lhs));
+            AF_CHECK(af_mul(&log_res, log_lhs, rhs, batchMode));
+            AF_CHECK(af_exp(&res, log_res));
+            std::swap(*out, res);
+            return AF_SUCCESS;
         }
     } CATCHALL;
 
@@ -153,7 +162,13 @@ af_err af_root(af_array *out, const af_array lhs, const af_array rhs, const bool
         ArrayInfo linfo = getInfo(lhs);
         ArrayInfo rinfo = getInfo(rhs);
         if (linfo.isComplex() || rinfo.isComplex()) {
-            AF_ERROR("Powers of Complex numbers not supported", AF_ERR_NOT_SUPPORTED);
+            af_array log_lhs, log_res;
+            af_array res;
+            AF_CHECK(af_log(&log_lhs, lhs));
+            AF_CHECK(af_div(&log_res, log_lhs, rhs, batchMode));
+            AF_CHECK(af_exp(&res, log_res));
+            std::swap(*out, res);
+            return AF_SUCCESS;
         }
 
         af_array one;
@@ -260,6 +275,8 @@ static af_err af_logic(af_array *out, const af_array lhs, const af_array rhs, co
         case b8 : res = logicOp<char   , op>(lhs, rhs, odims); break;
         case s64: res = logicOp<intl   , op>(lhs, rhs, odims); break;
         case u64: res = logicOp<uintl  , op>(lhs, rhs, odims); break;
+        case s16: res = logicOp<short  , op>(lhs, rhs, odims); break;
+        case u16: res = logicOp<ushort , op>(lhs, rhs, odims); break;
         default: TYPE_ERROR(0, type);
         }
 
@@ -327,6 +344,11 @@ static af_err af_bitwise(af_array *out, const af_array lhs, const af_array rhs, 
 
         dim4 odims = getOutDims(linfo.dims(), rinfo.dims(), batchMode);
 
+        if(odims.ndims() == 0) {
+            dim_t my_dims[] = {0, 0, 0, 0};
+            return af_create_handle(out, AF_MAX_DIMS, my_dims, type);
+        }
+
         af_array res;
         switch (type) {
         case s32: res = bitOp<int    , op>(lhs, rhs, odims); break;
@@ -335,6 +357,8 @@ static af_err af_bitwise(af_array *out, const af_array lhs, const af_array rhs, 
         case b8 : res = bitOp<char   , op>(lhs, rhs, odims); break;
         case s64: res = bitOp<intl   , op>(lhs, rhs, odims); break;
         case u64: res = bitOp<uintl  , op>(lhs, rhs, odims); break;
+        case s16: res = bitOp<short  , op>(lhs, rhs, odims); break;
+        case u16: res = bitOp<ushort , op>(lhs, rhs, odims); break;
         default: TYPE_ERROR(0, type);
         }
 

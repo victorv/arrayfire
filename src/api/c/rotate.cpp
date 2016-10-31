@@ -45,7 +45,16 @@ af_err af_rotate(af_array *out, const af_array in, const float theta,
 
         af_dtype itype = info.getType();
 
-        ARG_ASSERT(3, method == AF_INTERP_NEAREST || method == AF_INTERP_BILINEAR);
+        ARG_ASSERT(3, method == AF_INTERP_NEAREST  ||
+                      method == AF_INTERP_BILINEAR ||
+                      method == AF_INTERP_BILINEAR_COSINE ||
+                      method == AF_INTERP_BICUBIC ||
+                      method == AF_INTERP_BICUBIC_SPLINE ||
+                      method == AF_INTERP_LOWER);
+
+        if(idims.elements() == 0) {
+            return af_retain_array(out, in);
+        }
         DIM_ASSERT(1, idims.elements() > 0);
 
         af::dim4 odims(odims0, odims1, idims[2], idims[3]);
@@ -60,6 +69,8 @@ af_err af_rotate(af_array *out, const af_array in, const float theta,
             case u32: output = rotate<uint   >(in, theta, odims, method);  break;
             case s64: output = rotate<intl   >(in, theta, odims, method);  break;
             case u64: output = rotate<uintl  >(in, theta, odims, method);  break;
+            case s16: output = rotate<short  >(in, theta, odims, method);  break;
+            case u16: output = rotate<ushort >(in, theta, odims, method);  break;
             case u8:  output = rotate<uchar  >(in, theta, odims, method);  break;
             case b8:  output = rotate<uchar  >(in, theta, odims, method);  break;
             default:  TYPE_ERROR(1, itype);

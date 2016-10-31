@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <err_cuda.hpp>
 
@@ -42,5 +40,7 @@ namespace cuda
     INSTANTIATE(intl   )
     INSTANTIATE(uintl  )
     INSTANTIATE(uchar  )
+    INSTANTIATE(short  )
+    INSTANTIATE(ushort )
 
 }

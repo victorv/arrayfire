@@ -18,6 +18,7 @@
 
 using std::string;
 using std::vector;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -81,7 +82,7 @@ TEST(ifft2, Invalid_Array)
 
     af::dim4 dims(100,1,1,1);
     ASSERT_EQ(AF_SUCCESS, af_create_array(&inArray, &(in.front()),
-                dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<cfloat>::af_type));
+                dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<float>::af_type));
 
     ASSERT_EQ(AF_ERR_SIZE, af_ifft2(&outArray, inArray, 0.01, 0, 0));
     ASSERT_EQ(AF_SUCCESS, af_release_array(inArray));
@@ -98,7 +99,7 @@ TEST(ifft3, Invalid_Array)
 
     af::dim4 dims(10,10,1,1);
     ASSERT_EQ(AF_SUCCESS, af_create_array(&inArray, &(in.front()),
-                dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<cfloat>::af_type));
+                dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<float>::af_type));
 
     ASSERT_EQ(AF_ERR_SIZE, af_ifft3(&outArray, inArray, 0.01, 0, 0, 0));
     ASSERT_EQ(AF_SUCCESS, af_release_array(inArray));
@@ -187,6 +188,21 @@ INSTANTIATE_TEST(fft2,  C2C_Float, false,  cfloat,  cfloat, string(TEST_DIR"/sig
 INSTANTIATE_TEST(fft2, C2C_Double, false, cdouble, cdouble, string(TEST_DIR"/signal/fft2_c2c.test"));
 INSTANTIATE_TEST(fft3,  C2C_Float, false,  cfloat,  cfloat, string(TEST_DIR"/signal/fft3_c2c.test"));
 INSTANTIATE_TEST(fft3, C2C_Double, false, cdouble, cdouble, string(TEST_DIR"/signal/fft3_c2c.test"));
+
+// Factors 7, 11, 13
+INSTANTIATE_TEST(fft , R2C_Float_7_11_13 , false, float  , cfloat , string(TEST_DIR"/signal/fft_r2c_7_11_13.test") );
+INSTANTIATE_TEST(fft , R2C_Double_7_11_13, false, double , cdouble, string(TEST_DIR"/signal/fft_r2c_7_11_13.test") );
+INSTANTIATE_TEST(fft2, R2C_Float_7_11_13 , false, float  , cfloat , string(TEST_DIR"/signal/fft2_r2c_7_11_13.test") );
+INSTANTIATE_TEST(fft2, R2C_Double_7_11_13, false, double , cdouble, string(TEST_DIR"/signal/fft2_r2c_7_11_13.test") );
+INSTANTIATE_TEST(fft3, R2C_Float_7_11_13 , false, float  , cfloat , string(TEST_DIR"/signal/fft3_r2c_7_11_13.test") );
+INSTANTIATE_TEST(fft3, R2C_Double_7_11_13, false, double , cdouble, string(TEST_DIR"/signal/fft3_r2c_7_11_13.test") );
+
+INSTANTIATE_TEST(fft , C2C_Float_7_11_13 , false, cfloat  , cfloat , string(TEST_DIR"/signal/fft_c2c_7_11_13.test") );
+INSTANTIATE_TEST(fft , C2C_Double_7_11_13, false, cdouble , cdouble, string(TEST_DIR"/signal/fft_c2c_7_11_13.test") );
+INSTANTIATE_TEST(fft2, C2C_Float_7_11_13 , false, cfloat  , cfloat , string(TEST_DIR"/signal/fft2_c2c_7_11_13.test") );
+INSTANTIATE_TEST(fft2, C2C_Double_7_11_13, false, cdouble , cdouble, string(TEST_DIR"/signal/fft2_c2c_7_11_13.test") );
+INSTANTIATE_TEST(fft3, C2C_Float_7_11_13 , false, cfloat  , cfloat , string(TEST_DIR"/signal/fft3_c2c_7_11_13.test") );
+INSTANTIATE_TEST(fft3, C2C_Double_7_11_13, false, cdouble , cdouble, string(TEST_DIR"/signal/fft3_c2c_7_11_13.test") );
 
 // transforms on padded and truncated arrays
 INSTANTIATE_TEST(fft2,  R2C_Float_Trunc, false,  float,  cfloat, string(TEST_DIR"/signal/fft2_r2c_trunc.test"), 16, 16);
@@ -579,4 +595,142 @@ TEST(fft3, GFOR)
 
     delete[] h_b;
     delete[] h_c;
+}
+
+TEST(fft, InPlace)
+{
+    af::array a = af::randu(1024, 1024, c32);
+    af::array b = af::fft(a);
+    af::fftInPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(ifft, InPlace)
+{
+    af::array a = af::randu(1024, 1024, c32);
+    af::array b = af::ifft(a);
+    af::ifftInPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(fft2, InPlace)
+{
+    af::array a = af::randu(1024, 1024, c32);
+    af::array b = af::fft2(a);
+    af::fft2InPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(ifft2, InPlace)
+{
+    af::array a = af::randu(1024, 1024, c32);
+    af::array b = af::ifft2(a);
+    af::ifft2InPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(fft3, InPlace)
+{
+    af::array a = af::randu(32, 32, 32, c32);
+    af::array b = af::fft3(a);
+    af::fft3InPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(ifft3, InPlace)
+{
+    af::array a = af::randu(32, 32, 32, c32);
+    af::array b = af::ifft3(a);
+    af::ifft3InPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+void fft2InPlaceFunc()
+{
+    af::array a = af::randu(1024, 1024, c32);
+    af::array b = af::fft2(a);
+    af::fft2InPlace(a);
+
+    std::vector<af::cfloat> ha(a.elements());
+    std::vector<af::cfloat> hb(b.elements());
+
+    a.host(&ha[0]);
+    b.host(&hb[0]);
+
+    for (int i = 0; i < (int)a.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+#define DEVICE_ITERATE(func) do {                                           \
+    const char* ENV = getenv("AF_MULTI_GPU_TESTS");                         \
+    if(ENV && ENV[0] == '0') {                                              \
+        func;                                                               \
+    } else {                                                                \
+        int oldDevice = af::getDevice();                                    \
+        for(int i = 0; i < af::getDeviceCount(); i++) {                     \
+            af::setDevice(i);                                               \
+            func;                                                           \
+        }                                                                   \
+        af::setDevice(oldDevice);                                           \
+    }                                                                       \
+} while(0);
+
+TEST(FFT2, MultiGPUInPlaceSquare_CPP)
+{
+    DEVICE_ITERATE((fft2InPlaceFunc()));
 }

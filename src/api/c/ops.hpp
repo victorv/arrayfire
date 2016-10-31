@@ -19,6 +19,9 @@
 
 using namespace detail;
 
+// Because isnan(cfloat) and isnan(cdouble) is not defined
+#define IS_NAN(val) !((val) == (val))
+
 template<typename T, af_op_t op>
 struct Binary
 {
@@ -108,12 +111,27 @@ struct Binary<T, af_min_t>
 {
     __DH__ T init()
     {
-        return detail::limit_max<T>();
+        return detail::maxval<T>();
     }
 
     __DH__ T operator() (T lhs, T rhs)
     {
         return detail::min(lhs, rhs);
+    }
+};
+
+
+template<>
+struct Binary<char, af_min_t>
+{
+    __DH__ char init()
+    {
+        return 1;
+    }
+
+    __DH__ char operator() (char lhs, char rhs)
+    {
+        return detail::min(lhs > 0, rhs > 0);
     }
 };
 
@@ -124,7 +142,7 @@ struct Binary<T, af_min_t>
         __DH__ T init()                         \
         {                                       \
             return detail::scalar<T>(           \
-                detail::limit_max<Tr>()         \
+                detail::maxval<Tr>()         \
                 );                              \
         }                                       \
                                                 \
@@ -144,7 +162,7 @@ struct Binary<T, af_max_t>
 {
     __DH__ T init()
     {
-        return detail::limit_min<T>();
+        return detail::minval<T>();
     }
 
     __DH__ T operator() (T lhs, T rhs)
@@ -167,40 +185,6 @@ struct Binary<char, af_max_t>
     }
 };
 
-template<>
-struct Binary<char, af_min_t>
-{
-    __DH__ char init()
-    {
-        return 1;
-    }
-
-    __DH__ char operator() (char lhs, char rhs)
-    {
-        return detail::min(lhs > 0, rhs > 0);
-    }
-};
-
-#define SPECIALIZE_FLOATING_MAX(T, Tr)          \
-    template<>                                  \
-    struct Binary<T, af_max_t>                  \
-    {                                           \
-        __DH__ T init()                         \
-        {                                       \
-            return detail::scalar<T>(           \
-                -detail::limit_max<Tr>()        \
-                );                              \
-        }                                       \
-                                                \
-        __DH__ T operator() (T lhs, T rhs)      \
-        {                                       \
-            return detail::max(lhs, rhs);       \
-        }                                       \
-    };                                          \
-
-SPECIALIZE_FLOATING_MAX(float, float)
-SPECIALIZE_FLOATING_MAX(double, double)
-
 #define SPECIALIZE_COMPLEX_MAX(T, Tr)           \
     template<>                                  \
     struct Binary<T, af_max_t>                  \
@@ -221,7 +205,7 @@ SPECIALIZE_FLOATING_MAX(double, double)
 SPECIALIZE_COMPLEX_MAX(cfloat, float)
 SPECIALIZE_COMPLEX_MAX(cdouble, double)
 
-#undef SPECIALIZE_FLOATING_MAX
+#undef SPECIALIZE_COMPLEX_MAX
 
 template<typename Ti, typename To, af_op_t op>
 struct Transform
@@ -229,6 +213,24 @@ struct Transform
     __DH__ To operator ()(Ti in)
     {
         return (To)(in);
+    }
+};
+
+template<typename Ti, typename To>
+struct Transform<Ti, To, af_min_t>
+{
+    __DH__ To operator ()(Ti in)
+    {
+        return (To) (IS_NAN(in) ? Binary<To, af_min_t>().init() : in);
+    }
+};
+
+template<typename Ti, typename To>
+struct Transform<Ti, To, af_max_t>
+{
+    __DH__ To operator ()(Ti in)
+    {
+        return (To) (IS_NAN(in) ? Binary<To, af_max_t>().init() : in);
     }
 };
 

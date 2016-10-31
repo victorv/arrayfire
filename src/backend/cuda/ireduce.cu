@@ -9,8 +9,6 @@
 
 #include <complex>
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <ireduce.hpp>
 
@@ -49,6 +47,10 @@ namespace cuda
     INSTANTIATE(af_min_t, cdouble)
     INSTANTIATE(af_min_t, int    )
     INSTANTIATE(af_min_t, uint   )
+    INSTANTIATE(af_min_t, intl   )
+    INSTANTIATE(af_min_t, uintl  )
+    INSTANTIATE(af_min_t, short  )
+    INSTANTIATE(af_min_t, ushort )
     INSTANTIATE(af_min_t, char   )
     INSTANTIATE(af_min_t, uchar  )
 
@@ -59,6 +61,10 @@ namespace cuda
     INSTANTIATE(af_max_t, cdouble)
     INSTANTIATE(af_max_t, int    )
     INSTANTIATE(af_max_t, uint   )
+    INSTANTIATE(af_max_t, intl   )
+    INSTANTIATE(af_max_t, uintl  )
+    INSTANTIATE(af_max_t, short  )
+    INSTANTIATE(af_max_t, ushort )
     INSTANTIATE(af_max_t, char   )
     INSTANTIATE(af_max_t, uchar  )
 }

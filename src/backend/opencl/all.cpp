@@ -18,6 +18,10 @@ namespace opencl
     INSTANTIATE(af_and_t, cdouble, char)
     INSTANTIATE(af_and_t, int    , char)
     INSTANTIATE(af_and_t, uint   , char)
+    INSTANTIATE(af_and_t, intl   , char)
+    INSTANTIATE(af_and_t, uintl  , char)
     INSTANTIATE(af_and_t, char   , char)
     INSTANTIATE(af_and_t, uchar  , char)
+    INSTANTIATE(af_and_t, short  , char)
+    INSTANTIATE(af_and_t, ushort , char)
 }

@@ -23,6 +23,11 @@ using std::cout;
 using std::endl;
 using af::cfloat;
 using af::cdouble;
+using af::array;
+using af::randomEngine;
+using af::randomEngineType;
+using af::mean;
+using af::stdev;
 
 template<typename T>
 class Random : public ::testing::Test
@@ -33,7 +38,7 @@ class Random : public ::testing::Test
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<float, cfloat, double, cdouble, int, unsigned, unsigned char> TestTypes;
+typedef ::testing::Types<float, cfloat, double, cdouble, int, unsigned, intl, uintl, unsigned char> TestTypes;
 
 // register the type list
 TYPED_TEST_CASE(Random, TestTypes);
@@ -46,11 +51,48 @@ class Random_norm : public ::testing::Test
         }
 };
 
+template<typename T>
+class RandomEngine : public ::testing::Test
+{
+    public:
+        virtual void SetUp() {
+        }
+};
+
+template<typename T>
+class RandomEngineSeed : public ::testing::Test
+{
+    public:
+        virtual void SetUp() {
+        }
+};
+
+template<typename T>
+class RandomSeed : public ::testing::Test
+{
+    public:
+        virtual void SetUp() {
+        }
+};
+
 // create a list of types to be tested
 typedef ::testing::Types<float, cfloat, double, cdouble> TestTypesNorm;
-
 // register the type list
 TYPED_TEST_CASE(Random_norm, TestTypesNorm);
+
+// create a list of types to be tested
+typedef ::testing::Types<float, double> TestTypesEngine;
+// register the type list
+TYPED_TEST_CASE(RandomEngine, TestTypesEngine);
+
+typedef ::testing::Types<unsigned> TestTypesEngineSeed;
+// register the type list
+TYPED_TEST_CASE(RandomEngineSeed, TestTypesEngineSeed);
+
+// create a list of types to be tested
+typedef ::testing::Types<unsigned> TestTypesSeed;
+// register the type list
+TYPED_TEST_CASE(RandomSeed, TestTypesSeed);
 
 template<typename T>
 void randuTest(af::dim4 & dims)
@@ -59,6 +101,7 @@ void randuTest(af::dim4 & dims)
 
     af_array outArray = 0;
     ASSERT_EQ(AF_SUCCESS, af_randu(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<T>::af_type));
+    ASSERT_EQ(af_sync(-1), AF_SUCCESS);
     if(outArray != 0) af_release_array(outArray);
 }
 
@@ -69,61 +112,21 @@ void randnTest(af::dim4 &dims)
 
     af_array outArray = 0;
     ASSERT_EQ(AF_SUCCESS, af_randn(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<T>::af_type));
+    ASSERT_EQ(af_sync(-1), AF_SUCCESS);
     if(outArray != 0) af_release_array(outArray);
 }
 
-// INT, UNIT, CHAR, UCHAR Not Supported by RANDN
-template<>
-void randnTest<int>(af::dim4 &dims)
-{
-    if (noDoubleTests<int>()) return;
-
-    af_array outArray = 0;
-    ASSERT_EQ(AF_ERR_TYPE, af_randn(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<int>::af_type));
-    if(outArray != 0) af_release_array(outArray);
-}
-
-template<>
-void randnTest<unsigned>(af::dim4 &dims)
-{
-    if (noDoubleTests<unsigned>()) return;
-
-    af_array outArray = 0;
-    ASSERT_EQ(AF_ERR_TYPE, af_randn(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<unsigned>::af_type));
-    if(outArray != 0) af_release_array(outArray);
-}
-
-template<>
-void randnTest<char>(af::dim4 &dims)
-{
-    if (noDoubleTests<char>()) return;
-
-    af_array outArray = 0;
-    ASSERT_EQ(AF_ERR_TYPE, af_randn(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<char>::af_type));
-    if(outArray != 0) af_release_array(outArray);
-}
-
-template<>
-void randnTest<unsigned char>(af::dim4 &dims)
-{
-    if (noDoubleTests<unsigned char>()) return;
-
-    af_array outArray = 0;
-    ASSERT_EQ(AF_ERR_TYPE, af_randn(&outArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<unsigned char>::af_type));
-    if(outArray != 0) af_release_array(outArray);
-}
-
-#define RAND(d0, d1, d2, d3)                            \
-    TYPED_TEST(Random,randu_##d0##_##d1##_##d2##_##d3)  \
-    {                                                   \
-        af::dim4 dims(d0, d1, d2, d3);                  \
-        randuTest<TypeParam>(dims);                     \
-    }                                                   \
-    TYPED_TEST(Random,randn_##d0##_##d1##_##d2##_##d3)  \
-    {                                                   \
-        af::dim4 dims(d0, d1, d2, d3);                  \
-        randnTest<TypeParam>(dims);                     \
-    }                                                   \
+#define RAND(d0, d1, d2, d3)                                    \
+    TYPED_TEST(Random,randu_##d0##_##d1##_##d2##_##d3)          \
+    {                                                           \
+        af::dim4 dims(d0, d1, d2, d3);                          \
+        randuTest<TypeParam>(dims);                             \
+    }                                                           \
+    TYPED_TEST(Random_norm,randn_##d0##_##d1##_##d2##_##d3)     \
+    {                                                           \
+        af::dim4 dims(d0, d1, d2, d3);                          \
+        randnTest<TypeParam>(dims);                             \
+    }                                                           \
 
 RAND(1024, 1024,    1,    1);
 RAND( 512,  512,    1,    1);
@@ -165,6 +168,7 @@ void randuArgsTest()
     dim_t dims[] = {1, 2, 3, 0};
     af_array outArray = 0;
     ASSERT_EQ(AF_ERR_SIZE, af_randu(&outArray, ndims, dims, (af_dtype) af::dtype_traits<char>::af_type));
+    ASSERT_EQ(af_sync(-1), AF_SUCCESS);
     if(outArray != 0) af_release_array(outArray);
 }
 
@@ -184,58 +188,67 @@ TEST(Random, CPP)
     af::dim4 dims(1, 2, 3, 1);
     af::array out1 = af::randu(dims);
     af::array out2 = af::randn(dims);
+    af::sync();
 }
 
 template<typename T>
-void testSetSeed(const uintl seed0, const uintl seed1, bool is_norm = false)
+void testSetSeed(const uintl seed0, const uintl seed1)
 {
 
     if (noDoubleTests<T>()) return;
+
+    uintl orig_seed = af::getSeed();
 
     const int num = 1024 * 1024;
     af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
 
     af::setSeed(seed0);
-    af::array in0 = is_norm ? af::randn(num, ty) : af::randu(num, ty);
+    af::array in0 = af::randu(num, ty);
 
     af::setSeed(seed1);
-    af::array in1 = is_norm ? af::randn(num, ty) : af::randu(num, ty);
+    af::array in1 = af::randu(num, ty);
 
     af::setSeed(seed0);
-    af::array in2 = is_norm ? af::randn(num, ty) : af::randu(num, ty);
+    af::array in2 = af::randu(num, ty);
+    af::array in3 = af::randu(num, ty);
 
     std::vector<T> h_in0(num);
     std::vector<T> h_in1(num);
     std::vector<T> h_in2(num);
+    std::vector<T> h_in3(num);
 
     in0.host((void *)&h_in0[0]);
     in1.host((void *)&h_in1[0]);
     in2.host((void *)&h_in2[0]);
+    in3.host((void *)&h_in3[0]);
 
     for (int i = 0; i < num; i++) {
         // Verify if same seed produces same arrays
-        ASSERT_EQ(h_in0[i], h_in2[i]);
+        ASSERT_EQ(h_in0[i], h_in2[i]) << "at : " << i;
 
-        // Verify different arrays don't clash at same location
+        // Verify different arrays created with different seeds differ
         // b8 and u9 can clash because they generate a small set of values
-        if (ty != b8 && ty != u8) ASSERT_NE(h_in0[i], h_in1[i]);
+        if (ty != b8 && ty != u8) ASSERT_NE(h_in0[i], h_in1[i]) << "at : " << i;
+
+        // Verify different arrays created one after the other with same seed differ
+        // b8 and u9 can clash because they generate a small set of values
+        if (ty != b8 && ty != u8) ASSERT_NE(h_in2[i], h_in3[i]) << "at : " << i;
     }
+
+    af::setSeed(orig_seed); // Reset the seed
 }
 
-TYPED_TEST(Random, setSeed)
+TYPED_TEST(RandomSeed, setSeed)
 {
-    testSetSeed<TypeParam>(10101, 23232, false);
-}
-
-TYPED_TEST(Random_norm, setSeed)
-{
-    testSetSeed<TypeParam>(456, 789, false);
+    testSetSeed<TypeParam>(10101, 23232);
 }
 
 template<typename T>
 void testGetSeed(const uintl seed0, const uintl seed1)
 {
     if (noDoubleTests<T>()) return;
+
+    uintl orig_seed = af::getSeed();
 
     const int num = 1024;
     af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
@@ -251,9 +264,121 @@ void testGetSeed(const uintl seed0, const uintl seed1)
     af::setSeed(seed0);
     af::array in2 = af::randu(num, ty);
     ASSERT_EQ(af::getSeed(), seed0);
+
+    af::setSeed(orig_seed); // Reset the seed
 }
 
 TYPED_TEST(Random, getSeed)
 {
     testGetSeed<TypeParam>(1234, 9876);
+}
+
+template <typename T>
+void testRandomEngineUniform(randomEngineType type)
+{
+    if (noDoubleTests<T>()) return;
+    af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
+
+    int elem = 16*1024*1024;
+    af::randomEngine r(type, 0);
+    array A = randu(elem, ty, r);
+    T m = mean<T>(A);
+    T s = stdev<T>(A);
+    ASSERT_NEAR(m, 0.5, 1e-3);
+    ASSERT_NEAR(s, 0.2887, 1e-2);
+}
+
+template <typename T>
+void testRandomEngineNormal(randomEngineType type)
+{
+    if (noDoubleTests<T>()) return;
+    af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
+
+    int elem = 16*1024*1024;
+    af::randomEngine r(type, 0);
+    array A = randn(elem, ty, r);
+    T m = mean<T>(A);
+    T s = stdev<T>(A);
+    ASSERT_NEAR(m, 0, 1e-1);
+    ASSERT_NEAR(s, 1, 1e-1);
+}
+
+TYPED_TEST(RandomEngine, philoxRandomEngineUniform)
+{
+    testRandomEngineUniform<TypeParam>(AF_RANDOM_ENGINE_PHILOX_4X32_10);
+}
+
+TYPED_TEST(RandomEngine, philoxRandomEngineNormal)
+{
+    testRandomEngineNormal<TypeParam>(AF_RANDOM_ENGINE_PHILOX_4X32_10);
+}
+
+TYPED_TEST(RandomEngine, threefryRandomEngineUniform)
+{
+    testRandomEngineUniform<TypeParam>(AF_RANDOM_ENGINE_THREEFRY_2X32_16);
+}
+
+TYPED_TEST(RandomEngine, threefryRandomEngineNormal)
+{
+    testRandomEngineNormal<TypeParam>(AF_RANDOM_ENGINE_THREEFRY_2X32_16);
+}
+
+TYPED_TEST(RandomEngine, mersenneRandomEngineUniform)
+{
+    testRandomEngineUniform<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
+}
+
+TYPED_TEST(RandomEngine, mersenneRandomEngineNormal)
+{
+    testRandomEngineNormal<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
+}
+
+template <typename T>
+void testRandomEngineSeed(randomEngineType type)
+{
+    int elem = 4*32*1024;
+    uintl orig_seed = 0;
+    uintl new_seed = 1;
+    af::randomEngine e(type, orig_seed);
+
+    af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
+    array d1 = randu(elem, ty, e);
+    e.setSeed(new_seed);
+    array d2 = randu(elem, ty, e);
+    e.setSeed(orig_seed);
+    array d3 = randu(elem, ty, e);
+    array d4 = randu(elem, ty, e);
+
+    std::vector<T> h1(elem);
+    std::vector<T> h2(elem);
+    std::vector<T> h3(elem);
+    std::vector<T> h4(elem);
+
+    d1.host((void*)h1.data());
+    d2.host((void*)h2.data());
+    d3.host((void*)h3.data());
+    d4.host((void*)h4.data());
+
+    for (int i = 0; i < elem; i++) {
+        ASSERT_EQ(h1[i], h3[i]) << "at : " << i;
+        if (ty != b8 && ty != u8) {
+            ASSERT_NE(h1[i], h2[i]) << "at : " << i;
+            ASSERT_NE(h3[i], h4[i]) << "at : " << i;
+        }
+    }
+}
+
+TYPED_TEST(RandomEngineSeed, philoxSeedUniform)
+{
+    testRandomEngineSeed<TypeParam>(AF_RANDOM_ENGINE_PHILOX_4X32_10);
+}
+
+TYPED_TEST(RandomEngineSeed, threefrySeedUniform)
+{
+    testRandomEngineSeed<TypeParam>(AF_RANDOM_ENGINE_THREEFRY_2X32_16);
+}
+
+TYPED_TEST(RandomEngineSeed, mersenneSeedUniform)
+{
+    testRandomEngineSeed<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
 }

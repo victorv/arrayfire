@@ -32,7 +32,7 @@ namespace af
     static af_array gforReorder(const af_array in, unsigned dim)
     {
         // This is here to stop gcc from complaining
-        if (dim > 3) THROW(AF_ERR_SIZE);
+        if (dim > 3) AF_THROW_ERR("GFor: Dimension is invalid", AF_ERR_SIZE);
         unsigned order[AF_MAX_DIMS] = {0, 1, 2, dim};
         order[dim] = 3;
         af_array out;
@@ -67,24 +67,7 @@ namespace af
             }
             return odims;
         } catch(std::logic_error &err) {
-            AF_THROW_MSG(err.what(), AF_ERR_SIZE);
-        }
-    }
-
-    static unsigned size_of(af::dtype type)
-    {
-        switch(type) {
-        case f32: return sizeof(float);
-        case f64: return sizeof(double);
-        case s32: return sizeof(int);
-        case u32: return sizeof(unsigned);
-        case s64: return sizeof(intl);
-        case u64: return sizeof(uintl);
-        case u8 : return sizeof(unsigned char);
-        case b8 : return sizeof(unsigned char);
-        case c32: return sizeof(float) * 2;
-        case c64: return sizeof(double) * 2;
-        default: return sizeof(float);
+            AF_THROW_ERR(err.what(), AF_ERR_SIZE);
         }
     }
 
@@ -136,7 +119,7 @@ namespace af
         switch (src) {
         case afHost:   AF_THROW(af_create_array(arr, (const void * const)ptr, AF_MAX_DIMS, my_dims, ty)); break;
         case afDevice: AF_THROW(af_device_array(arr, (const void *      )ptr, AF_MAX_DIMS, my_dims, ty)); break;
-        default: AF_THROW_MSG("Can not create array from the requested source pointer",
+        default: AF_THROW_ERR("Can not create array from the requested source pointer",
                               AF_ERR_ARG);
         }
     }
@@ -182,7 +165,7 @@ namespace af
                 dims[3]);                                               \
     }                                                                   \
     template<> AFAPI                                                    \
-    array::array(dim_t d0, const T *ptr, af::source src) \
+    array::array(dim_t d0, const T *ptr, af::source src)                \
         : arr(0)                                                        \
     {                                                                   \
         initDataArray<T>(&arr, ptr, src, d0);                           \
@@ -219,6 +202,8 @@ namespace af
     INSTANTIATE(char)
     INSTANTIATE(intl)
     INSTANTIATE(uintl)
+    INSTANTIATE(short)
+    INSTANTIATE(unsigned short)
 
 #undef INSTANTIATE
 
@@ -278,7 +263,7 @@ namespace af
     {
         dim_t nElements;
         AF_THROW(af_get_elements(&nElements, get()));
-        return nElements * size_of(type());
+        return nElements * getSizeOf(type());
     }
 
     array array::copy() const
@@ -309,6 +294,7 @@ namespace af
     INSTANTIATE(floating)
     INSTANTIATE(integer)
     INSTANTIATE(bool)
+    INSTANTIATE(sparse)
 
 #undef INSTANTIATE
 
@@ -343,7 +329,7 @@ namespace af
                 case 2: return gen_indexing(*this, z, s0, z, z);
                 case 3: return gen_indexing(*this, z, z, s0, z);
                 case 4: return gen_indexing(*this, z, z, z, s0);
-                default: THROW(AF_ERR_SIZE);
+                default: AF_THROW_ERR("ndims for Array is invalid", AF_ERR_SIZE);
             }
         }
         else {
@@ -353,29 +339,12 @@ namespace af
 
     const array::array_proxy array::operator()(const index &s0, const index &s1, const index &s2, const index &s3) const
     {
-        if(isvector()   && s1.isspan()
-                        && s2.isspan()
-                        && s3.isspan()) {
-            int num_dims = numDims(this->arr);
-
-            switch(num_dims) {
-            case 1: return gen_indexing(*this, s0, s1, s2, s3);
-            case 2: return gen_indexing(*this, s1, s0, s2, s3);
-            case 3: return gen_indexing(*this, s1, s2, s0, s3);
-            case 4: return gen_indexing(*this, s1, s2, s3, s0);
-            default: THROW(AF_ERR_SIZE);
-            }
-        }
-        else {
-            return gen_indexing(*this, s0, s1, s2, s3);
-        }
-
+        return gen_indexing(*this, s0, s1, s2, s3);
     }
 
     const array::array_proxy array::row(int index) const
     {
-        seq idx(index, index, 1);
-        return this->operator()(idx, span, span, span);
+        return this->operator()(index, span, span, span);
     }
 
     array::array_proxy array::row(int index)
@@ -385,8 +354,7 @@ namespace af
 
     const array::array_proxy array::col(int index) const
     {
-        seq idx(index, index, 1);
-        return this->operator()(span, idx, span, span);
+        return this->operator()(span, index, span, span);
     }
 
     array::array_proxy array::col(int index)
@@ -396,8 +364,7 @@ namespace af
 
     const array::array_proxy array::slice(int index) const
     {
-        seq idx(index, index, 1);
-        return this->operator()(span, span, idx, span);
+        return this->operator()(span, span, index, span);
     }
 
     array::array_proxy array::slice(int index)
@@ -492,15 +459,16 @@ namespace af
         bool batch_assign = false;
         bool is_reordered = false;
         if (dim >= 0) {
+            //FIXME: Figure out a faster, cleaner way to do this
+            dim4 out_dims = seqToDims(impl->indices, this_dims, false);
+
             batch_assign = true;
             for (int i = 0; i < AF_MAX_DIMS; i++) {
                 if (this->impl->indices[i].isBatch) batch_assign &= (other_dims[i] == 1);
-                else                          batch_assign &= (other_dims[i] == this_dims[i]);
+                else                          batch_assign &= (other_dims[i] == out_dims[i]);
             }
 
             if (batch_assign) {
-                //FIXME: Figure out a faster, cleaner way to do this
-                dim4 out_dims = seqToDims(impl->indices, this_dims, false);
                 af_array out;
                 AF_THROW(af_tile(&out, other_arr,
                                  out_dims[0] / other_dims[0],
@@ -509,7 +477,7 @@ namespace af
                                  out_dims[3] / other_dims[3]));
                 other_arr = out;
 
-            } else if (this_dims != other_dims) {
+            } else if (out_dims != other_dims) {
                 // HACK: This is a quick check to see if other has been reordered inside gfor
                 // TODO: Figure out if this breaks and implement a cleaner method
                 other_arr = gforReorder(other_arr, dim);
@@ -572,6 +540,7 @@ namespace af
     array::array_proxy&
     af::array::array_proxy::operator=(array_proxy &&other) {
         array out = other;
+        other.impl = nullptr;
         return *this = out;
     }
 #endif
@@ -606,6 +575,14 @@ namespace af
         return out;
     }
 
+    af_array array::array_proxy::get() const
+    {
+        array tmp = *this;
+        af_array out = 0;
+        AF_THROW(af_retain_array(&out, tmp.get()));
+        return out;
+    }
+
 #define MEM_FUNC(PREFIX, FUNC)                  \
     PREFIX array::array_proxy::FUNC() const     \
     {                                           \
@@ -613,7 +590,6 @@ namespace af
         return out.FUNC();                      \
     }
 
-    MEM_FUNC(af_array               , get)
     MEM_FUNC(dim_t                  , elements)
     MEM_FUNC(array                  , T)
     MEM_FUNC(array                  , H)
@@ -634,6 +610,7 @@ namespace af
     MEM_FUNC(bool                   , isfloating)
     MEM_FUNC(bool                   , isinteger)
     MEM_FUNC(bool                   , isbool)
+    MEM_FUNC(bool                   , issparse)
     MEM_FUNC(void                   , eval)
     //MEM_FUNC(void                   , unlock)
 #undef MEM_FUNC
@@ -665,14 +642,17 @@ namespace af
     ASSIGN_TYPE(char               , OP)        \
     ASSIGN_TYPE(unsigned char      , OP)        \
     ASSIGN_TYPE(bool               , OP)        \
+    ASSIGN_TYPE(short              , OP)        \
+    ASSIGN_TYPE(unsigned short     , OP)        \
 
     ASSIGN_OP(= , =)
     ASSIGN_OP(+=, +)
     ASSIGN_OP(-=, -)
     ASSIGN_OP(*=, *)
     ASSIGN_OP(/=, /)
-#undef ASSIGN_TYPE
 #undef ASSIGN_OP
+
+#undef ASSIGN_TYPE
 
 #define SELF_OP(OP, op1)                                                          \
     array::array_proxy& array::array_proxy::operator OP(const array_proxy &other) \
@@ -739,12 +719,19 @@ namespace af
     }
 
     //FIXME: Check if this leaks
-#define MEM_INDEX(FUNC_SIG, USAGE)          \
-    array::array_proxy                      \
-    array::array_proxy::FUNC_SIG            \
-    {                                       \
-        array *out = new array(this->get());\
-        return out->USAGE;                  \
+#define MEM_INDEX(FUNC_SIG, USAGE)                  \
+    array::array_proxy                              \
+    array::array_proxy::FUNC_SIG                    \
+    {                                               \
+        array *out = new array(this->get());        \
+        return out->USAGE;                          \
+    }                                               \
+                                                    \
+    const array::array_proxy                        \
+    array::array_proxy::FUNC_SIG const              \
+    {                                               \
+        const array *out = new array(this->get());  \
+        return out->USAGE;                          \
     }
 
     MEM_INDEX(row(int index)                , row(index));
@@ -804,6 +791,8 @@ namespace af
     ASSIGN_TYPE(char               , OP)                            \
     ASSIGN_TYPE(unsigned char      , OP)                            \
     ASSIGN_TYPE(bool               , OP)                            \
+    ASSIGN_TYPE(short              , OP)                            \
+    ASSIGN_TYPE(unsigned short     , OP)                            \
 
     ASSIGN_OP(+=, af_add)
     ASSIGN_OP(-=, af_sub)
@@ -811,6 +800,7 @@ namespace af
     ASSIGN_OP(/=, af_div)
 
 #undef ASSIGN_OP
+
 #undef ASSIGN_TYPE
 
 #define ASSIGN_TYPE(TY, OP)                                     \
@@ -836,28 +826,54 @@ namespace af
     ASSIGN_TYPE(char               , OP)        \
     ASSIGN_TYPE(unsigned char      , OP)        \
     ASSIGN_TYPE(bool               , OP)        \
+    ASSIGN_TYPE(short              , OP)        \
+    ASSIGN_TYPE(unsigned short     , OP)        \
 
     ASSIGN_OP(= )
 
 #undef ASSIGN_OP
+
 #undef ASSIGN_TYPE
+
+af::dtype implicit_dtype(af::dtype scalar_type, af::dtype array_type)
+{
+    // If same, do not do anything
+    if (scalar_type == array_type) return scalar_type;
+
+    // If complex, return appropriate complex type
+    if (scalar_type == c32 || scalar_type == c64) {
+        if (array_type == f64 || array_type == c64) return c64;
+        return c32;
+    }
+
+    // If 64 bit precision, do not lose precision
+    if (array_type == f64 || array_type == c64 ||
+        array_type == f32 || array_type == c32 ) return array_type;
+
+    // Default to single precision by default when multiplying with scalar
+    if ((scalar_type == f64 || scalar_type == c64) &&
+        (array_type  != f64 && array_type  != c64)) {
+        return f32;
+    }
+
+    // Punt to C api for everything else
+    return scalar_type;
+}
 
 #define BINARY_TYPE(TY, OP, func, dty)                          \
     array operator OP(const array& plhs, const TY &value)       \
     {                                                           \
         af_array out;                                           \
-        af::dtype ty = plhs.type();                             \
-        af::dtype cty = plhs.isrealfloating() ? ty : dty;       \
+        af::dtype cty = implicit_dtype(dty, plhs.type());       \
         array cst = constant(value, plhs.dims(), cty);          \
         AF_THROW(func(&out, plhs.get(), cst.get(), gforGet())); \
         return array(out);                                      \
     }                                                           \
     array operator OP(const TY &value, const array &other)      \
     {                                                           \
-        const af_array rhs = other.get();                         \
+        const af_array rhs = other.get();                       \
         af_array out;                                           \
-        af::dtype ty = other.type();                            \
-        af::dtype cty = other.isrealfloating() ? ty : dty;      \
+        af::dtype cty = implicit_dtype(dty, other.type());      \
         array cst = constant(value, other.dims(), cty);         \
         AF_THROW(func(&out, cst.get(), rhs, gforGet()));        \
         return array(out);                                      \
@@ -883,6 +899,8 @@ namespace af
     BINARY_TYPE(char               , OP, func, b8)              \
     BINARY_TYPE(unsigned char      , OP, func, u8)              \
     BINARY_TYPE(bool               , OP, func, b8)              \
+    BINARY_TYPE(short              , OP, func, s16)             \
+    BINARY_TYPE(unsigned short     , OP, func, u16)             \
 
     BINARY_OP(+, af_add)
     BINARY_OP(-, af_sub)
@@ -896,15 +914,16 @@ namespace af
     BINARY_OP(>=, af_ge)
     BINARY_OP(&&, af_and)
     BINARY_OP(||, af_or)
-    BINARY_OP(%, af_rem)
+    BINARY_OP(%, af_mod)
     BINARY_OP(&, af_bitand)
     BINARY_OP(|, af_bitor)
     BINARY_OP(^, af_bitxor)
     BINARY_OP(<<, af_bitshiftl)
     BINARY_OP(>>, af_bitshiftr)
 
-#undef BINARY_TYPE
 #undef BINARY_OP
+
+#undef BINARY_TYPE
 
     array array::operator-() const
     {
@@ -919,8 +938,7 @@ namespace af
     {
         af_array lhs = this->get();
         af_array out;
-        array cst = constant(0, this->dims(), this->type());
-        AF_THROW(af_eq(&out, cst.get(), lhs, gforGet()));
+        AF_THROW(af_not(&out, lhs));
         return array(out);
     }
 
@@ -934,7 +952,7 @@ namespace af
     template<> AFAPI T *array::host() const                         \
     {                                                               \
         if (type() != (af::dtype)dtype_traits<T>::af_type) {        \
-            AF_THROW_MSG("Requested type doesn't match with array", \
+            AF_THROW_ERR("Requested type doesn't match with array", \
                          AF_ERR_TYPE);                              \
         }                                                           \
                                                                     \
@@ -980,13 +998,22 @@ namespace af
     INSTANTIATE(char)
     INSTANTIATE(intl)
     INSTANTIATE(uintl)
+    INSTANTIATE(short)
+    INSTANTIATE(unsigned short)
 
 #undef INSTANTIATE
+
+    template<> AFAPI void* array::device() const
+    {
+        void *ptr = NULL;
+        AF_THROW(af_get_device_ptr(&ptr, get()));
+        return (void *)ptr;
+    }
 
 
 // array_proxy instanciations
 #define TEMPLATE_MEM_FUNC(TYPE, RETURN_TYPE, FUNC)      \
-    template <>                                         \
+    template <> AFAPI                                   \
     RETURN_TYPE array::array_proxy::FUNC() const        \
     {                                                   \
         array out = *this;                              \
@@ -1008,14 +1035,54 @@ namespace af
     INSTANTIATE(char)
     INSTANTIATE(intl)
     INSTANTIATE(uintl)
+    INSTANTIATE(short)
+    INSTANTIATE(unsigned short)
 
 #undef INSTANTIATE
 #undef TEMPLATE_MEM_FUNC
 
-    //FIXME: This needs to be implemented at a later point
-    void array::unlock() const {}
+    //FIXME: These functions need to be implemented properly at a later point
     void array::array_proxy::unlock() const {}
+    void array::array_proxy::lock() const {}
+    bool array::array_proxy::isLocked() const { return false; }
 
     int array::nonzeros() const { return count<int>(*this); }
 
+    void array::lock() const
+    {
+        AF_THROW(af_lock_array(get()));
+    }
+
+    bool array::isLocked() const
+    {
+        bool res;
+        AF_THROW(af_is_locked_array(&res, get()));
+        return res;
+    }
+
+    void array::unlock() const
+    {
+        AF_THROW(af_unlock_array(get()));
+    }
+
+    void eval(int num, array **arrays)
+    {
+        std::vector<af_array> outputs(num);
+        for (int i = 0; i < num; i++) {
+            outputs[i] = arrays[i]->get();
+        }
+        AF_THROW(af_eval_multiple(num, &outputs[0]));
+    }
+
+    void setManualEvalFlag(bool flag)
+    {
+        AF_THROW(af_set_manual_eval_flag(flag));
+    }
+
+    bool getManualEvalFlag()
+    {
+        bool flag;
+        AF_THROW(af_get_manual_eval_flag(&flag));
+        return flag;
+    }
 }

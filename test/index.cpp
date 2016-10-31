@@ -126,7 +126,7 @@ public:
     vector<af_seq> span_seqs;
 };
 
-typedef ::testing::Types<float, double, af::cfloat, af::cdouble, int, unsigned, unsigned char, intl, uintl> AllTypes;
+typedef ::testing::Types<float, double, af::cfloat, af::cdouble, int, unsigned, unsigned char, intl, uintl, short, ushort> AllTypes;
 TYPED_TEST_CASE(Indexing1D, AllTypes);
 
 TYPED_TEST(Indexing1D, Continious)          { DimCheck<TypeParam>(this->continuous_seqs);           }
@@ -495,6 +495,61 @@ TYPED_TEST(Indexing, 3D_to_1D)
     DimCheckND<TypeParam>(this->continuous3d_to_1d, TEST_DIR"/index/Continuous3Dto1D.test", 3);
 }
 
+
+TEST(Index, Docs_Util_C_API)
+{
+    //![ex_index_util_0]
+    af_index_t* indexers = 0;
+    af_err err = af_create_indexers(&indexers); // Memory is allocated on heap by the callee
+    // by default all the indexers span all the elements along the given dimension
+
+    //Create array
+    af_array a;
+    unsigned ndims = 2;
+    dim_t dim[] = {10,10};
+    af_randu(&a, ndims, dim, f32);
+
+    //Create index array
+    af_array idx;
+    unsigned n = 1;
+    dim_t d[] = {5};
+    af_range(&idx, n, d, 0, s32);
+
+    af_print_array(a);
+    af_print_array(idx);
+
+    //create array indexer
+    err = af_set_array_indexer(indexers, idx, 1);
+
+    //index with indexers
+    af_array out;
+    af_index_gen(&out, a, 2, indexers); // number of indexers should be two since
+                                        // we have set only second af_index_t
+    if (err != AF_SUCCESS) {
+        printf("Failed in af_index_gen: %d\n", err);
+        throw;
+    }
+    af_print_array(out);
+    af_release_array(out);
+
+    af_seq zeroIndices = af_make_seq(0.0, 9.0, 2.0);
+
+    err = af_set_seq_indexer(indexers, &zeroIndices, 0, false);
+
+    err = af_index_gen(&out, a, 2, indexers);
+    if (err != AF_SUCCESS) {
+        printf("Failed in af_index_gen: %d\n", err);
+        throw;
+    }
+    af_print_array(out);
+
+    af_release_indexers(indexers);
+    af_release_array(a);
+    af_release_array(idx);
+    af_release_array(out);
+    //![ex_index_util_0]
+}
+
 //////////////////////////////// CPP ////////////////////////////////
 TEST(Indexing2D, ColumnContiniousCPP)
 {
@@ -549,7 +604,7 @@ class lookup : public ::testing::Test
         }
 };
 
-typedef ::testing::Types<float, double, int, unsigned, unsigned char> ArrIdxTestTypes;
+typedef ::testing::Types<float, double, int, unsigned, unsigned char, short, ushort, intl, uintl> ArrIdxTestTypes;
 TYPED_TEST_CASE(lookup, ArrIdxTestTypes);
 
 template<typename T>
@@ -1250,4 +1305,234 @@ TEST(Indexing, SNIPPET_indexing_ref)
     af_print(B);
     //! [ex_indexing_ref]
     //TODO: Confirm the outputs are correct. see #697
+}
+
+TEST(Indexing, SNIPPET_indexing_copy)
+{
+  af::array A = af::constant(0,1, s32);
+  af::index s1;
+  s1 = af::index(A);
+  // At exit both A and s1 will be destroyed
+  // but the underlying array should only be
+  // freed once.
+}
+
+TEST(Asssign, LinearIndexSeq)
+{
+    using af::array;
+    const int nx = 5;
+    const int ny = 4;
+
+    const int st = nx - 2;
+    const int en = nx * (ny - 1);
+    const int num = (en - st + 1);
+
+    array a = af::randu(nx, ny);
+    af::index idx = af::seq(st, en);
+
+    af_array in_arr = a.get();
+    af_index_t ii = idx.get();
+    af_array out_arr;
+
+    ASSERT_EQ(AF_SUCCESS,
+              af_index(&out_arr, in_arr, 1, &ii.idx.seq));
+
+    af::array out(out_arr);
+
+    ASSERT_EQ(out.dims(0), num);
+    ASSERT_EQ(out.elements(), num);
+
+    std::vector<float> hout(nx * ny);
+    std::vector<float> ha(nx * ny);
+
+    a.host(&ha[0]);
+    out.host(&hout[0]);
+
+    for (int i = 0; i < num; i++) {
+        ASSERT_EQ(ha[i + st], hout[i]);
+    }
+}
+
+TEST(Asssign, LinearIndexGenSeq)
+{
+    using af::array;
+    const int nx = 5;
+    const int ny = 4;
+
+    const int st = nx - 2;
+    const int en = nx * (ny - 1);
+    const int num = (en - st + 1);
+
+    array a = af::randu(nx, ny);
+    af::index idx = af::seq(st, en);
+
+    af_array in_arr = a.get();
+    af_index_t ii = idx.get();
+    af_array out_arr;
+
+    ASSERT_EQ(AF_SUCCESS,
+              af_index_gen(&out_arr, in_arr, 1, &ii));
+
+    af::array out(out_arr);
+
+    ASSERT_EQ(out.dims(0), num);
+    ASSERT_EQ(out.elements(), num);
+
+    std::vector<float> hout(nx * ny);
+    std::vector<float> ha(nx * ny);
+
+    a.host(&ha[0]);
+    out.host(&hout[0]);
+
+    for (int i = 0; i < num; i++) {
+        ASSERT_EQ(ha[i + st], hout[i]);
+    }
+}
+
+TEST(Asssign, LinearIndexGenArr)
+{
+    using af::array;
+    const int nx = 5;
+    const int ny = 4;
+
+    const int st = nx - 2;
+    const int en = nx * (ny - 1);
+    const int num = (en - st + 1);
+
+    array a = af::randu(nx, ny);
+    af::index idx = af::array(af::seq(st, en));
+
+    af_array in_arr = a.get();
+    af_index_t ii = idx.get();
+    af_array out_arr;
+
+    ASSERT_EQ(AF_SUCCESS,
+              af_index_gen(&out_arr, in_arr, 1, &ii));
+
+    af::array out(out_arr);
+
+    ASSERT_EQ(out.dims(0), num);
+    ASSERT_EQ(out.elements(), num);
+
+    std::vector<float> hout(nx * ny);
+    std::vector<float> ha(nx * ny);
+
+    a.host(&ha[0]);
+    out.host(&hout[0]);
+
+    for (int i = 0; i < num; i++) {
+        ASSERT_EQ(ha[i + st], hout[i]);
+    }
+}
+
+TEST(Index, OutOfBounds)
+{
+    using af::array;
+
+    uint gold[7] = {0, 9, 49, 119, 149, 149, 148};
+    uint h_idx[7] = {0, 9, 49, 119, 149, 150, 151};
+    uint output[7];
+
+    array a = af::iota(af::dim4(50, 1, 3)).as(s32);
+    array idx(7, h_idx);
+    array b = a(idx);
+    b.host((void*)output);
+
+    for(int i=0; i<7; ++i)
+        ASSERT_EQ(gold[i], output[i]);
+}
+
+TEST(Index, ISSUE_1101_FULL)
+{
+    using namespace af;
+    deviceGC();
+    array a = randu(5,5);
+    std::vector<float> ha(a.elements());
+    a.host(&ha[0]);
+
+    size_t aby, abu, lby, lbu;
+    deviceMemInfo(&aby, &abu, &lby, &lbu);
+
+    array b = a(span, span);
+
+    size_t aby1, abu1, lby1, lbu1;
+    deviceMemInfo(&aby1, &abu1, &lby1, &lbu1);
+
+    ASSERT_EQ(aby, aby1);
+    ASSERT_EQ(abu, abu1);
+    ASSERT_EQ(lby, lby1);
+    ASSERT_EQ(lbu, lbu1);
+
+    std::vector<float> hb(b.elements());
+    b.host(&hb[0]);
+    for (int i = 0; i < b.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+}
+
+TEST(Index, ISSUE_1101_COL0)
+{
+    using namespace af;
+    deviceGC();
+    array a = randu(5,5);
+    std::vector<float> ha(a.elements());
+    a.host(&ha[0]);
+
+    size_t aby, abu, lby, lbu;
+    deviceMemInfo(&aby, &abu, &lby, &lbu);
+
+    array b = a(span, 0);
+
+    size_t aby1, abu1, lby1, lbu1;
+    deviceMemInfo(&aby1, &abu1, &lby1, &lbu1);
+
+    ASSERT_EQ(aby, aby1);
+    ASSERT_EQ(abu, abu1);
+    ASSERT_EQ(lby, lby1);
+    ASSERT_EQ(lbu, lbu1);
+
+    std::vector<float> hb(b.elements());
+    b.host(&hb[0]);
+    for (int i = 0; i < b.elements(); i++) {
+        ASSERT_EQ(ha[i], hb[i]);
+    }
+
+}
+
+TEST(Index, ISSUE_1101_MODDIMS)
+{
+    using namespace af;
+    deviceGC();
+    array a = randu(5,5);
+    std::vector<float> ha(a.elements());
+    a.host(&ha[0]);
+
+    size_t aby, abu, lby, lbu;
+    deviceMemInfo(&aby, &abu, &lby, &lbu);
+
+    int st = 0;
+    int en = 9;
+    int nx = 2;
+    int ny = 5;
+    array b = a(seq(st, en));
+    array c = moddims(b, nx, ny);
+    size_t aby1, abu1, lby1, lbu1;
+    deviceMemInfo(&aby1, &abu1, &lby1, &lbu1);
+
+    ASSERT_EQ(aby, aby1);
+    ASSERT_EQ(abu, abu1);
+    ASSERT_EQ(lby, lby1);
+    ASSERT_EQ(lbu, lbu1);
+
+    std::vector<float> hb(b.elements());
+    b.host(&hb[0]);
+    for (int i = 0; i < b.elements(); i++) {
+        ASSERT_EQ(ha[i + st], hb[i]);
+    }
+
+    std::vector<float> hc(c.elements());
+    c.host(&hc[0]);
+    for (int i = 0; i < c.elements(); i++) {
+        ASSERT_EQ(ha[i + st], hc[i]);
+    }
 }

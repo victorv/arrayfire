@@ -18,6 +18,10 @@ namespace opencl
     INSTANTIATE(af_max_t, cdouble, cdouble)
     INSTANTIATE(af_max_t, int    , int    )
     INSTANTIATE(af_max_t, uint   , uint   )
+    INSTANTIATE(af_max_t, intl   , intl   )
+    INSTANTIATE(af_max_t, uintl  , uintl  )
     INSTANTIATE(af_max_t, char   , char   )
     INSTANTIATE(af_max_t, uchar  , uchar  )
+    INSTANTIATE(af_max_t, short  , short  )
+    INSTANTIATE(af_max_t, ushort , ushort )
 }

@@ -69,16 +69,20 @@ array edge(const array &in, int method = 0)
     return normalize(mag);
 }
 
-void edge(bool console)
+void edge()
 {
     af::Window myWindow("Edge Dectectors");
     af::Window myWindow2(512, 512, "Histogram");
 
-    array in = loadImage(ASSETS_DIR "/examples/images/lena.ppm", false);
+    array in = loadImage(ASSETS_DIR "/examples/images/trees_ctm.jpg", false);
 
     array prewitt = edge(in, 1);
     array sobelFilter   = edge(in, 2);
     array hst = histogram(in, 256, 0, 255);
+
+    float freq_max = max<float>(hst);
+    myWindow2.setAxesLimits(0, 255, 0, freq_max);
+    myWindow2.setAxesTitles("Bins", "Frequency");
 
     while(!myWindow.close() && !myWindow2.close()) {
 
@@ -99,14 +103,13 @@ void edge(bool console)
 int main(int argc, char* argv[])
 {
     int device = argc > 1 ? atoi(argv[1]) : 0;
-    bool console = argc > 2 ? argv[2][0] == '-' : false;
 
     try {
         af::setDevice(device);
         af::info();
 
         printf("** ArrayFire Edge Detection Demo **\n");
-        edge(console);
+        edge();
 
     } catch (af::exception &e) {
         fprintf(stderr, "%s\n", e.what());

@@ -9,7 +9,6 @@
 
 //This is the array implementation class.
 #pragma once
-#include <af/array.h>
 #include <af/dim4.hpp>
 #include <ArrayInfo.hpp>
 #include <backend.hpp>
@@ -20,12 +19,28 @@
 #include <memory>
 #include <algorithm>
 #include <vector>
+#include <platform.hpp>
+#include <queue.hpp>
+
+// cpu::Array class forward declaration
+namespace cpu
+{
+template<typename T> class Array;
+// kernel::evalArray fn forward declaration
+namespace kernel
+{
+template<typename T> void evalArray(cpu::Array<T> in);
+}
+}
 
 namespace cpu
 {
 
     using std::shared_ptr;
     using af::dim4;
+
+    template<typename T>
+    void evalMultiple(std::vector<Array<T> *> arrays);
 
     template<typename T> class Array;
 
@@ -63,9 +78,6 @@ namespace cpu
                             const std::vector<af_seq> &index,
                             bool copy=true);
 
-    template<typename T>
-    void evalArray(const Array<T> &A);
-
     // Creates a new Array object on the heap and returns a reference to it.
     template<typename T>
     void destroyArray(Array<T> *A);
@@ -73,33 +85,87 @@ namespace cpu
     template<typename T>
     void *getDevicePtr(const Array<T>& arr)
     {
-        memUnlink((T *)arr.get());
-        return (void *)arr.get();
+        T *ptr = arr.device();
+        memLock(ptr);
+
+        return (void *)ptr;
+    }
+
+    template<typename T>
+    void *getRawPtr(const Array<T>& arr)
+    {
+        getQueue().sync();
+        return (void *)(arr.get(false));
     }
 
     // Array Array Implementation
     template<typename T>
-    class Array : public ArrayInfo
+    class Array
     {
+        ArrayInfo info; // Must be the first element of Array<T>
         //TODO: Generator based array
 
         //data if parent. empty if child
         std::shared_ptr<T> data;
         af::dim4 data_dims;
-
         TNJ::Node_ptr node;
+
         bool ready;
-        dim_t offset;
         bool owner;
 
+        Array() = default;
         Array(dim4 dims);
-        explicit Array(dim4 dims, const T * const in_data);
-        Array(const Array<T>& parnt, const dim4 &dims, const dim4 &offset, const dim4 &stride);
+
+        explicit Array(dim4 dims, const T * const in_data, bool is_device, bool copy_device=false);
+        Array(const Array<T>& parnt, const dim4 &dims, const dim_t &offset, const dim4 &stride);
         explicit Array(af::dim4 dims, TNJ::Node_ptr n);
 
     public:
 
-        ~Array();
+
+        Array(af::dim4 dims, af::dim4 strides, dim_t offset,
+              const T * const in_data, bool is_device = false);
+
+        void resetInfo(const af::dim4& dims)        { info.resetInfo(dims);         }
+        void resetDims(const af::dim4& dims)        { info.resetDims(dims);         }
+        void modDims(const af::dim4 &newDims)       { info.modDims(newDims);        }
+        void modStrides(const af::dim4 &newStrides) { info.modStrides(newStrides);  }
+        void setId(int id)                          { info.setId(id);               }
+
+#define INFO_FUNC(RET_TYPE, NAME)   \
+    RET_TYPE NAME() const { return info.NAME(); }
+
+        INFO_FUNC(const af_dtype& ,getType)
+        INFO_FUNC(const af::dim4& ,strides)
+        INFO_FUNC(size_t          ,elements)
+        INFO_FUNC(size_t          ,ndims)
+        INFO_FUNC(const af::dim4& ,dims )
+        INFO_FUNC(int             ,getDevId)
+
+#undef INFO_FUNC
+
+#define INFO_IS_FUNC(NAME)\
+    bool NAME () const { return info.NAME(); }
+
+        INFO_IS_FUNC(isEmpty);
+        INFO_IS_FUNC(isScalar);
+        INFO_IS_FUNC(isRow);
+        INFO_IS_FUNC(isColumn);
+        INFO_IS_FUNC(isVector);
+        INFO_IS_FUNC(isComplex);
+        INFO_IS_FUNC(isReal);
+        INFO_IS_FUNC(isDouble);
+        INFO_IS_FUNC(isSingle);
+        INFO_IS_FUNC(isRealFloating);
+        INFO_IS_FUNC(isFloating);
+        INFO_IS_FUNC(isInteger);
+        INFO_IS_FUNC(isBool);
+        INFO_IS_FUNC(isLinear);
+        INFO_IS_FUNC(isSparse);
+
+#undef INFO_IS_FUNC
+
+        ~Array() = default;
 
         bool isReady() const { return ready; }
 
@@ -108,14 +174,25 @@ namespace cpu
         void eval();
         void eval() const;
 
-        dim_t getOffset() const { return offset; }
+        dim_t getOffset() const { return info.getOffset(); }
         shared_ptr<T> getData() const {return data; }
 
         dim4 getDataDims() const
         {
-            // This is for moddims
-            // dims and data_dims are different when moddims is used
-            return isOwner() ? dims() : data_dims;
+            return data_dims;
+        }
+
+        void setDataDims(const dim4 &new_dims)
+        {
+            modDims(new_dims);
+            data_dims = new_dims;
+        }
+
+        T* device();
+
+        T* device() const
+        {
+            return const_cast<Array<T>*>(this)->device();
         }
 
         T* get(bool withOffset = true)
@@ -126,10 +203,18 @@ namespace cpu
         const T* get(bool withOffset = true) const
         {
             if (!isReady()) eval();
-            return data.get() + (withOffset ? offset : 0);
+            return data.get() + (withOffset ? getOffset() : 0);
+        }
+
+        int useCount() const
+        {
+            if (!isReady()) eval();
+            return data.use_count();
         }
 
         TNJ::Node_ptr getNode() const;
+
+        friend void evalMultiple<T>(std::vector<Array<T> *> arrays);
 
         friend Array<T> createValueArray<T>(const af::dim4 &size, const T& value);
         friend Array<T> createHostDataArray<T>(const af::dim4 &size, const T * const data);
@@ -143,9 +228,11 @@ namespace cpu
                                           const std::vector<af_seq> &index,
                                           bool copy);
 
+        friend void kernel::evalArray<T>(Array<T> in);
+
         friend void destroyArray<T>(Array<T> *arr);
-        friend void evalArray<T>(const Array<T> &arr);
         friend void *getDevicePtr<T>(const Array<T>& arr);
+        friend void *getRawPtr<T>(const Array<T>& arr);
     };
 
 }

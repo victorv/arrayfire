@@ -8,7 +8,6 @@
  ********************************************************/
 
 #pragma once
-#include <af/array.h>
 #include <optypes.hpp>
 #include <string>
 #include <vector>
@@ -30,12 +29,31 @@ namespace JIT
         std::string m_type_str;
         std::string m_name_str;
         int m_id;
+        int m_height;
         bool m_set_id;
         bool m_gen_func;
         bool m_gen_param;
         bool m_gen_offset;
         bool m_set_arg;
         bool m_gen_name;
+        bool m_linear;
+        bool m_set_is_linear;
+
+    protected:
+
+        void resetCommonFlags()
+        {
+            m_height = 0;
+            m_set_id = false;
+            m_gen_func = false;
+            m_gen_param = false;
+            m_gen_offset = false;
+            m_set_arg = false;
+            m_gen_name = false;
+            m_linear = false;
+            m_set_is_linear = false;
+        }
+
 
     public:
 
@@ -43,12 +61,15 @@ namespace JIT
             : m_type_str(type_str),
               m_name_str(name_str),
               m_id(-1),
+              m_height(0),
               m_set_id(false),
               m_gen_func(false),
               m_gen_param(false),
               m_gen_offset(false),
               m_set_arg(false),
-              m_gen_name(false)
+              m_gen_name(false),
+              m_linear(false),
+              m_set_is_linear(false)
         {}
 
         virtual void genKerName(std::stringstream &kerStream) {}
@@ -62,13 +83,19 @@ namespace JIT
         virtual void setArgs(std::vector<void *> &args, bool is_linear) { m_set_arg = true; }
         virtual bool isLinear(dim_t dims[4]) { return true; }
 
-        virtual void resetFlags() {}
+        virtual void resetFlags()
+        {
+            resetCommonFlags();
+        }
+
         virtual void getInfo(unsigned &len, unsigned &buf_count, unsigned &bytes)
         {
             len = 0;
             buf_count = 0;
             bytes = 0;
         }
+
+        virtual bool isBuffer() { return false; }
 
         std::string getTypeStr() { return m_type_str; }
 
@@ -77,6 +104,7 @@ namespace JIT
         bool isGenOffset() { return m_gen_offset; }
 
         int getId()  { return m_id; }
+        int getHeight()  { return m_height; }
         std::string getNameStr() { return m_name_str; }
 
         virtual ~Node() {}

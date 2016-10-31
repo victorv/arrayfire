@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <meanshift.hpp>
 #include <kernel/meanshift.hpp>
@@ -39,5 +37,9 @@ INSTANTIATE(char  )
 INSTANTIATE(int   )
 INSTANTIATE(uint  )
 INSTANTIATE(uchar )
+INSTANTIATE(short )
+INSTANTIATE(ushort)
+INSTANTIATE(intl  )
+INSTANTIATE(uintl )
 
 }

@@ -12,35 +12,42 @@
 #include <Array.hpp>
 #include <plot.hpp>
 #include <err_cpu.hpp>
-#include <stdexcept>
 #include <graphics_common.hpp>
-#include <reduce.hpp>
-#include <memory.hpp>
+#include <platform.hpp>
+#include <queue.hpp>
 
 using af::dim4;
 
 namespace cpu
 {
-    template<typename T>
-    void copy_plot(const Array<T> &P, fg::Plot* plot)
-    {
-        CheckGL("Before CopyArrayToVBO");
+using namespace gl;
 
-        glBindBuffer(GL_ARRAY_BUFFER, plot->vbo());
-        glBufferSubData(GL_ARRAY_BUFFER, 0, plot->size(), P.get());
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+template<typename T>
+void copy_plot(const Array<T> &P, forge::Plot* plot)
+{
+    P.eval();
+    getQueue().sync();
 
-        CheckGL("In CopyArrayToVBO");
-    }
+    CheckGL("Before CopyArrayToVBO");
 
-    #define INSTANTIATE(T)  \
-        template void copy_plot<T>(const Array<T> &P, fg::Plot* plot);
+    glBindBuffer(GL_ARRAY_BUFFER, plot->vertices());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, plot->verticesSize(), P.get());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    INSTANTIATE(float)
-    INSTANTIATE(double)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(uchar)
+    CheckGL("In CopyArrayToVBO");
+}
+
+#define INSTANTIATE(T)  \
+    template void copy_plot<T>(const Array<T> &P, forge::Plot* plot);
+
+INSTANTIATE(float)
+INSTANTIATE(double)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(uchar)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+
 }
 
 #endif  // WITH_GRAPHICS

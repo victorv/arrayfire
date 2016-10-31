@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <fftconvolve.hpp>
 #include <kernel/fftconvolve.hpp>
@@ -49,7 +47,7 @@ static const dim4 calcPackedSize(Array<T> const& i1,
 }
 
 template<typename T, typename convT, typename cT, bool isDouble, bool roundOut, dim_t baseDim>
-Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool expand, ConvolveBatchKind kind)
+Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool expand, AF_BATCH_KIND kind)
 {
     const dim4 sDims = signal.dims();
     const dim4 fDims = filter.dims();
@@ -57,7 +55,7 @@ Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool 
     dim4 oDims(1);
     if (expand) {
         for(dim_t d=0; d<4; ++d) {
-            if (kind==ONE2ONE || kind==ONE2MANY) {
+            if (kind==AF_BATCH_NONE || kind==AF_BATCH_RHS) {
                 oDims[d] = sDims[d]+fDims[d]-1;
             } else {
                 oDims[d] = (d<baseDim ? sDims[d]+fDims[d]-1 : sDims[d]);
@@ -65,7 +63,7 @@ Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool 
         }
     } else {
         oDims = sDims;
-        if (kind==ONE2MANY) {
+        if (kind==AF_BATCH_RHS) {
             for (dim_t i=baseDim; i<4; ++i)
                 oDims[i] = fDims[i];
         }
@@ -78,8 +76,8 @@ Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool 
 
     kernel::packDataHelper<cT, T>(signal_packed, filter_packed, signal, filter, baseDim);
 
-    fft_common<cT, baseDim, true>(signal_packed, signal_packed);
-    fft_common<cT, baseDim, true>(filter_packed, filter_packed);
+    fft_inplace<cT, baseDim, true>(signal_packed);
+    fft_inplace<cT, baseDim, true>(filter_packed);
 
     Array<T> out = createEmptyArray<T>(oDims);
 
@@ -88,14 +86,14 @@ Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool 
     else
         kernel::complexMultiplyHelper<T, cT>(out, signal_packed, filter_packed, signal, filter, kind);
 
-    if (kind == ONE2MANY) {
-        fft_common<cT, baseDim, false>(filter_packed, filter_packed);
+    if (kind == AF_BATCH_RHS) {
+        fft_inplace<cT, baseDim, false>(filter_packed);
         if (expand)
             kernel::reorderOutputHelper<T, cT, roundOut, baseDim, true >(out, filter_packed, signal, filter, kind);
         else
             kernel::reorderOutputHelper<T, cT, roundOut, baseDim, false>(out, filter_packed, signal, filter, kind);
     } else {
-        fft_common<cT, baseDim, false>(signal_packed, signal_packed);
+        fft_inplace<cT, baseDim, false>(signal_packed);
         if (expand)
             kernel::reorderOutputHelper<T, cT, roundOut, baseDim, true >(out, signal_packed, signal, filter, kind);
         else
@@ -107,11 +105,11 @@ Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool 
 
 #define INSTANTIATE(T, convT, cT, isDouble, roundOut)                                                   \
     template Array<T> fftconvolve <T, convT, cT, isDouble, roundOut, 1>                                 \
-        (Array<T> const& signal, Array<T> const& filter, const bool expand, ConvolveBatchKind kind);    \
+        (Array<T> const& signal, Array<T> const& filter, const bool expand, AF_BATCH_KIND kind);        \
     template Array<T> fftconvolve <T, convT, cT, isDouble, roundOut, 2>                                 \
-        (Array<T> const& signal, Array<T> const& filter, const bool expand, ConvolveBatchKind kind);    \
+        (Array<T> const& signal, Array<T> const& filter, const bool expand, AF_BATCH_KIND kind);        \
     template Array<T> fftconvolve <T, convT, cT, isDouble, roundOut, 3>                                 \
-        (Array<T> const& signal, Array<T> const& filter, const bool expand, ConvolveBatchKind kind);
+        (Array<T> const& signal, Array<T> const& filter, const bool expand, AF_BATCH_KIND kind);
 
 INSTANTIATE(double, double, cdouble, true , false)
 INSTANTIATE(float , float,  cfloat,  false, false)
@@ -119,5 +117,9 @@ INSTANTIATE(uint  , float,  cfloat,  false, true)
 INSTANTIATE(int   , float,  cfloat,  false, true)
 INSTANTIATE(uchar , float,  cfloat,  false, true)
 INSTANTIATE(char  , float,  cfloat,  false, true)
+INSTANTIATE(ushort, float,  cfloat,  false, true)
+INSTANTIATE(short , float,  cfloat,  false, true)
+INSTANTIATE(uintl , float,  cfloat,  false, true)
+INSTANTIATE(intl  , float,  cfloat,  false, true)
 
 }

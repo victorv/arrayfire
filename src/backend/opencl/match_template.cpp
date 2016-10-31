@@ -9,7 +9,6 @@
 
 #include <af/dim4.hpp>
 #include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <err_opencl.hpp>
 #include <match_template.hpp>
@@ -54,5 +53,7 @@ INSTANTIATE(char  ,  float)
 INSTANTIATE(int   ,  float)
 INSTANTIATE(uint  ,  float)
 INSTANTIATE(uchar ,  float)
+INSTANTIATE(short ,  float)
+INSTANTIATE(ushort,  float)
 
 }

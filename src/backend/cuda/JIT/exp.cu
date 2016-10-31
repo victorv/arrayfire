@@ -9,6 +9,16 @@
 
 #include "types.h"
 
+__device__ double sigmoid(double in)
+{
+    return (1.0) / (1 + exp(-in));
+}
+
+__device__ float sigmoidf(float in)
+{
+    return (1.0) / (1 + expf(-in));
+}
+
 #define MATH_BASIC(fn, T)                       \
     __device__ T ___##fn(T a)                   \
     {                                           \
@@ -22,6 +32,10 @@
     MATH_BASIC(fn, uint)                        \
     MATH_BASIC(fn, char)                        \
     MATH_BASIC(fn, uchar)                       \
+    MATH_BASIC(fn, uintl)                       \
+    MATH_BASIC(fn, intl)                        \
+    MATH_BASIC(fn, ushort)                      \
+    MATH_BASIC(fn, short)                       \
     __device__ double ___##fn(double a)         \
     {                                           \
         return fn(a);                           \
@@ -32,6 +46,7 @@ MATH(exp)
 MATH(expm1)
 MATH(erf)
 MATH(erfc)
+MATH(sigmoid)
 
 MATH(log)
 MATH(log10)
@@ -53,6 +68,10 @@ MATH(cbrt)
     MATH2_BASIC(fn, uint)                           \
     MATH2_BASIC(fn, char)                           \
     MATH2_BASIC(fn, uchar)                          \
+    MATH2_BASIC(fn, uintl)                          \
+    MATH2_BASIC(fn, intl)                           \
+    MATH2_BASIC(fn, ushort)                         \
+    MATH2_BASIC(fn, short)                          \
     __device__ double ___##fn(double a, double b)   \
     {                                               \
         return fn(a, b);                            \

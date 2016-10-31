@@ -31,6 +31,9 @@ namespace cuda
             case AF_INTERP_BILINEAR:
                 kernel::resize<T, AF_INTERP_BILINEAR>(out, in);
                 break;
+            case AF_INTERP_LOWER:
+                kernel::resize<T, AF_INTERP_LOWER>(out, in);
+                break;
             default:
                 break;
         }
@@ -54,4 +57,6 @@ namespace cuda
     INSTANTIATE(uintl)
     INSTANTIATE(uchar)
     INSTANTIATE(char)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
 }
