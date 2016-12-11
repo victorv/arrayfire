@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <arrayfire.h>
 #include <testHelpers.hpp>
@@ -20,7 +21,7 @@ class Array : public ::testing::Test
 
 };
 
-typedef ::testing::Types<float, double, af::cfloat, af::cdouble, char, unsigned char, int, uint, intl, uintl> TestTypes;
+typedef ::testing::Types<float, double, af::cfloat, af::cdouble, char, unsigned char, int, uint, intl, uintl, short, ushort> TestTypes;
 TYPED_TEST_CASE(Array, TestTypes);
 
 TEST(Array, ConstructorDefault)
@@ -283,6 +284,26 @@ TYPED_TEST(Array, TypeAttributes)
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
             break;
+        case s16:
+            EXPECT_FALSE(one.isfloating());
+            EXPECT_FALSE(one.isdouble());
+            EXPECT_FALSE(one.issingle());
+            EXPECT_FALSE(one.isrealfloating());
+            EXPECT_TRUE(one.isinteger());
+            EXPECT_TRUE(one.isreal());
+            EXPECT_FALSE(one.iscomplex());
+            EXPECT_FALSE(one.isbool());
+            break;
+        case u16:
+            EXPECT_FALSE(one.isfloating());
+            EXPECT_FALSE(one.isdouble());
+            EXPECT_FALSE(one.issingle());
+            EXPECT_FALSE(one.isrealfloating());
+            EXPECT_TRUE(one.isinteger());
+            EXPECT_TRUE(one.isreal());
+            EXPECT_FALSE(one.iscomplex());
+            EXPECT_FALSE(one.isbool());
+            break;
         case u8:
             EXPECT_FALSE(one.isfloating());
             EXPECT_FALSE(one.isdouble());
@@ -372,4 +393,113 @@ TEST(Array, ShapeAttributes)
     EXPECT_FALSE(matrix.    iscolumn());
     EXPECT_FALSE(volume.    iscolumn());
     EXPECT_FALSE(hypercube. iscolumn());
+}
+
+TEST(Array, ISSUE_951)
+{
+// This works
+    //const af::array a(100, 100);
+    //af::array b = a.cols(0, 20);
+    //b = b.rows(10, 20);
+
+// This works
+    //af::array a(100, 100);
+    //af::array b = a.cols(0, 20).rows(10, 20);
+
+// This fails with linking error
+    const af::array a = randu(100, 100);
+    af::array b = a.cols(0, 20).rows(10, 20);
+}
+
+
+TEST(Device, simple)
+{
+    array a = randu(5,5);
+    {
+        float *ptr0 = a.device<float>();
+        float *ptr1 = a.device<float>();
+        ASSERT_EQ(ptr0, ptr1);
+    }
+
+    {
+        float *ptr0 = a.device<float>();
+        a.unlock();
+        float *ptr1 = a.device<float>();
+        ASSERT_EQ(ptr0, ptr1);
+    }
+}
+
+TEST(Device, index)
+{
+    array a = randu(5,5);
+    array b = a(span, 0);
+
+    ASSERT_NE(a.device<float>(), b.device<float>());
+}
+
+TEST(Device, unequal)
+{
+    {
+        array a = randu(5,5);
+        float *ptr = a.device<float>();
+        array b = a;
+        ASSERT_NE(ptr, b.device<float>());
+        ASSERT_EQ(ptr, a.device<float>());
+    }
+
+    {
+        array a = randu(5,5);
+        float *ptr = a.device<float>();
+        array b = a;
+        ASSERT_NE(ptr, a.device<float>());
+        ASSERT_EQ(ptr, b.device<float>());
+    }
+}
+
+TEST(DeviceId, Same)
+{
+    array a = randu(5,5);
+    ASSERT_EQ(getDevice(), getDeviceId(a));
+}
+
+TEST(DeviceId, Different)
+{
+    int ndevices = getDeviceCount();
+    if (ndevices < 2) return;
+    int id0 = getDevice();
+    int id1 = (id0 + 1) % ndevices;
+
+    {
+        array a = randu(5,5);
+        ASSERT_EQ(getDeviceId(a), id0);
+        setDevice(id1);
+
+        array b = randu(5,5);
+
+        ASSERT_EQ(getDeviceId(a), id0);
+        ASSERT_EQ(getDeviceId(b), id1);
+        ASSERT_NE(getDevice(), getDeviceId(a));
+        ASSERT_EQ(getDevice(), getDeviceId(b));
+
+        af_array c;
+        af_err err = af_matmul(&c, a.get(), b.get(), AF_MAT_NONE, AF_MAT_NONE);
+        ASSERT_EQ(err, AF_ERR_DEVICE);
+    }
+
+    setDevice(id1);
+    af::deviceGC();
+    setDevice(id0);
+    af::deviceGC();
+}
+
+TEST(Device, empty)
+{
+    array a = array();
+    ASSERT_EQ(a.device<float>() == NULL, 1);
+}
+
+TEST(Device, JIT)
+{
+    array a = constant(1, 5, 5);
+    ASSERT_EQ(a.device<float>() != NULL, 1);
 }

@@ -20,9 +20,6 @@ namespace cpu
     uint abs(uint val);
     uchar abs(uchar val);
     uintl abs(uintl val);
-#if !(defined(OS_WIN) || (defined(ARCH_32) && defined(OS_LNX)))  // Not(Windows or Tegra)
-    size_t abs(size_t val);
-#endif
 
     template<typename T> static inline T min(T lhs, T rhs) { return std::min(lhs, rhs); }
     cfloat min(cfloat lhs, cfloat rhs);
@@ -46,11 +43,12 @@ namespace cpu
         return retVal;
     }
 
-    template <typename T> static inline T limit_max()
-    { return std::numeric_limits<T>::max(); }
-
-    template <typename T> static inline T limit_min()
-    { return std::numeric_limits<T>::min(); }
+    template <typename T> T maxval() { return std::numeric_limits<T>::max(); }
+    template <typename T> T minval() { return std::numeric_limits<T>::min(); }
+    template <> STATIC_ float maxval() { return std::numeric_limits<float>::infinity(); }
+    template <> STATIC_ double maxval() { return std::numeric_limits<double>::infinity(); }
+    template <> STATIC_ float minval() { return -std::numeric_limits<float>::infinity(); }
+    template <> STATIC_ double minval() { return -std::numeric_limits<double>::infinity(); }
 
     template<typename T>
     static T scalar(double val)

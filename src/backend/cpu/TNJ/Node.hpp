@@ -8,10 +8,8 @@
  ********************************************************/
 
 #pragma once
-#include <af/array.h>
 #include <optypes.hpp>
 #include <vector>
-#include "Node.hpp"
 #include <memory>
 
 namespace cpu
@@ -24,12 +22,64 @@ namespace TNJ
     {
 
     protected:
+
+        int m_height;
+        int x, y, z, w;
         bool m_is_eval;
+        bool m_linear;
+        bool m_set_is_linear;
+
+
+        void resetCommonFlags()
+        {
+            m_height = 0;
+            x = -1;
+            y = -1;
+            z = -1;
+            w = -1;
+            m_is_eval = false;
+            m_linear = false;
+            m_set_is_linear = false;
+        }
+
+        bool calcCurrent(int xc)
+        {
+            bool res = (x == xc);
+            x = xc;
+            return !res;
+        }
+
+        bool calcCurrent(int xc, int yc, int zc, int wc)
+        {
+            bool res = (xc == x) && (yc == y) && (zc == z) && (wc == w);
+            x = xc;
+            y = yc;
+            z = zc;
+            w = wc;
+            return !res;
+        }
 
     public:
-        Node() : m_is_eval(false) {}
+        Node() :
+            m_height(0),
+            x(-1),
+            y(-1),
+            z(-1),
+            w(-1),
+            m_is_eval(false),
+            m_linear(false),
+            m_set_is_linear(false)
+        {}
+
+        int getHeight() { return m_height; }
 
         virtual void *calc(int x, int y, int z, int w)
+        {
+            m_is_eval = true;
+            return NULL;
+        }
+
+        virtual void *calc(int idx)
         {
             m_is_eval = true;
             return NULL;
@@ -42,7 +92,8 @@ namespace TNJ
             bytes = 0;
         }
 
-        virtual void reset(bool reset_off=true) { m_is_eval = false;}
+        virtual bool isLinear(const dim_t *dims) { return true; }
+        virtual void reset() { resetCommonFlags(); }
 
         virtual ~Node() {}
     };

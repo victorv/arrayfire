@@ -8,7 +8,6 @@
  ********************************************************/
 #pragma once
 
-#include <af/array.h>
 #include <Array.hpp>
 
 namespace cpu
@@ -26,4 +25,7 @@ namespace cpu
     template<typename inType, typename outType>
     Array<outType> padArray(Array<inType> const &in, dim4 const &dims,
                             outType default_value=outType(0), double factor=1.0);
+
+    template<typename T>
+    void multiply_inplace(Array<T> &in, double val);
 }

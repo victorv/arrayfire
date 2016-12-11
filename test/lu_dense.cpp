@@ -22,6 +22,7 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -30,6 +31,7 @@ using af::cdouble;
 TEST(LU, InPlaceSmall)
 {
     if (noDoubleTests<float>()) return;
+    if (noLAPACKTests()) return;
 
     int resultIdx = 0;
 
@@ -67,6 +69,7 @@ TEST(LU, InPlaceSmall)
 TEST(LU, SplitSmall)
 {
     if (noDoubleTests<float>()) return;
+    if (noLAPACKTests()) return;
 
     int resultIdx = 0;
 
@@ -117,6 +120,7 @@ template<typename T>
 void luTester(const int m, const int n, double eps)
 {
     if (noDoubleTests<T>()) return;
+    if (noLAPACKTests()) return;
 
 #if 1
     af::array a_orig = cpu_randu<T>(af::dim4(m, n));
@@ -155,11 +159,12 @@ void luTester(const int m, const int n, double eps)
     l2 = l2(af::span, af::seq(mn));
     u2 = u2(af::seq(mn), af::span);
 
-    ASSERT_NEAR(0, af::max<double>(af::abs(real(l2 - l))), eps);
-    ASSERT_NEAR(0, af::max<double>(af::abs(imag(l2 - l))), eps);
+    af::array a_recon2 = af::matmul(l2, u2);
+    af::array a_perm2 = a_orig(pivot2, af::span);
 
-    ASSERT_NEAR(0, af::max<double>(af::abs(real(u2 - u))), eps);
-    ASSERT_NEAR(0, af::max<double>(af::abs(imag(u2 - u))), eps);
+    ASSERT_NEAR(0, af::max<double>(af::abs(real(a_recon2 - a_perm2))), eps);
+    ASSERT_NEAR(0, af::max<double>(af::abs(imag(a_recon2 - a_perm2))), eps);
+
 }
 
 #define LU_BIG_TESTS(T, eps)                    \

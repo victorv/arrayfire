@@ -16,6 +16,7 @@
 #include <memory.hpp>
 #include <platform.hpp>
 #include <cstddef>
+#include <MemoryManager.hpp>
 
 using af::dim4;
 
@@ -28,57 +29,87 @@ namespace cuda
     using JIT::Node_ptr;
 
     template<typename T>
+    Node_ptr bufferNodePtr()
+    {
+        Node_ptr node(reinterpret_cast<Node *>(new BufferNode<T>(irname<T>(), afShortName<T>())));
+        return node;
+    }
+
+    template<typename T>
     Array<T>::Array(af::dim4 dims) :
-        info(getActiveDeviceId(), dims, af::dim4(0,0,0,0), calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
+        info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
         data(memAlloc<T>(dims.elements()), memFree<T>), data_dims(dims),
-        node(), offset(0), ready(true), owner(true)
+        node(bufferNodePtr<T>()), ready(true), owner(true)
     {}
 
     template<typename T>
-    Array<T>::Array(af::dim4 dims, const T * const in_data, bool is_device) :
-        info(getActiveDeviceId(), dims, af::dim4(0,0,0,0), calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
-        data((is_device ? (T *)in_data : memAlloc<T>(dims.elements())), memFree<T>),
+    Array<T>::Array(af::dim4 dims, const T * const in_data, bool is_device, bool copy_device) :
+        info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
+        data(((is_device & !copy_device) ? (T *)in_data : memAlloc<T>(dims.elements())), memFree<T>),
         data_dims(dims),
-        node(), offset(0), ready(true), owner(true)
+        node(bufferNodePtr<T>()), ready(true), owner(true)
     {
 #if __cplusplus > 199711L
         static_assert(std::is_standard_layout<Array<T>>::value, "Array<T> must be a standard layout type");
         static_assert(offsetof(Array<T>, info) == 0, "Array<T>::info must be the first member variable of Array<T>");
 #endif
         if (!is_device) {
-            CUDA_CHECK(cudaMemcpy(data.get(), in_data, dims.elements() * sizeof(T), cudaMemcpyHostToDevice));
+            CUDA_CHECK(cudaMemcpyAsync(data.get(), in_data, dims.elements() * sizeof(T),
+                                       cudaMemcpyHostToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+            CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
+        } else if (copy_device) {
+            CUDA_CHECK(cudaMemcpyAsync(data.get(), in_data, dims.elements() * sizeof(T),
+                                       cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+            CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
         }
     }
 
     template<typename T>
-    Array<T>::Array(const Array<T>& parent, const dim4 &dims, const dim4 &offsets, const dim4 &strides) :
-        info(parent.getDevId(), dims, offsets, strides, (af_dtype)dtype_traits<T>::af_type),
+    Array<T>::Array(const Array<T>& parent, const dim4 &dims, const dim_t &offset_, const dim4 &strides) :
+        info(parent.getDevId(), dims, offset_, strides, (af_dtype)dtype_traits<T>::af_type),
         data(parent.getData()), data_dims(parent.getDataDims()),
-        node(),
-        offset(parent.getOffset() + calcOffset(parent.strides(), offsets)),
+        node(bufferNodePtr<T>()),
         ready(true), owner(false)
     { }
 
     template<typename T>
     Array<T>::Array(Param<T> &tmp) :
-        info(getActiveDeviceId(), af::dim4(tmp.dims[0], tmp.dims[1], tmp.dims[2], tmp.dims[3]),
-                  af::dim4(0, 0, 0, 0),
-                  af::dim4(tmp.strides[0], tmp.strides[1], tmp.strides[2], tmp.strides[3]),
-                  (af_dtype)dtype_traits<T>::af_type),
+        info(getActiveDeviceId(),
+             af::dim4(tmp.dims[0], tmp.dims[1], tmp.dims[2], tmp.dims[3]),
+             0,
+             af::dim4(tmp.strides[0], tmp.strides[1], tmp.strides[2], tmp.strides[3]),
+             (af_dtype)dtype_traits<T>::af_type),
         data(tmp.ptr, memFree<T>),
         data_dims(af::dim4(tmp.dims[0], tmp.dims[1], tmp.dims[2], tmp.dims[3])),
-        node(), offset(0), ready(true), owner(true)
+        node(bufferNodePtr<T>()), ready(true), owner(true)
     {
     }
 
     template<typename T>
     Array<T>::Array(af::dim4 dims, JIT::Node_ptr n) :
-        info(-1, dims, af::dim4(0,0,0,0), calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
+        info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
         data(), data_dims(dims),
-        node(n), offset(0), ready(false), owner(true)
+        node(n), ready(false), owner(true)
     {
     }
 
+    template<typename T>
+    Array<T>::Array(af::dim4 dims, af::dim4 strides, dim_t offset_,
+                    const T * const in_data, bool is_device) :
+        info(getActiveDeviceId(), dims, offset_, strides, (af_dtype)dtype_traits<T>::af_type),
+        data(is_device ? (T*)in_data : memAlloc<T>(info.total()), memFree<T>),
+        data_dims(dims),
+        node(bufferNodePtr<T>()),
+        ready(true),
+        owner(true)
+    {
+        if (!is_device) {
+            cudaStream_t stream = getStream(getActiveDeviceId());
+            CUDA_CHECK(cudaMemcpyAsync(data.get(), in_data, info.total() * sizeof(T),
+                                       cudaMemcpyHostToDevice, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
+        }
+    }
 
     template<typename T>
     void Array<T>::eval()
@@ -99,11 +130,17 @@ namespace cuda
 
         evalNodes(res, this->getNode().get());
         ready = true;
-
-        Node_ptr prev = node;
-        prev->resetFlags();
         // FIXME: Replace the current node in any JIT possible trees with the new BufferNode
-        node.reset();
+        node = bufferNodePtr<T>();
+    }
+
+    template<typename T>
+    T* Array<T>::device()
+    {
+        if (!isOwner() || getOffset() || data.use_count() > 1) {
+            *this = copyArray<T>(*this);
+        }
+        return this->get();
     }
 
     template<typename T>
@@ -114,20 +151,68 @@ namespace cuda
     }
 
     template<typename T>
+    void evalMultiple(std::vector<Array<T>*> arrays)
+    {
+        std::vector<Param<T> > outputs;
+        std::vector<JIT::Node *> nodes;
+
+        for (int i = 0; i < (int)arrays.size(); i++) {
+            Array<T> *array = arrays[i];
+
+            if (array->isReady()) {
+                continue;
+            }
+
+            array->setId(getActiveDeviceId());
+            array->data = shared_ptr<T>(memAlloc<T>(array->elements()),
+                                        memFree<T>);
+
+            Param<T> res;
+            res.ptr = array->data.get();
+
+            for (int  i = 0; i < 4; i++) {
+                res.dims[i] = array->dims()[i];
+                res.strides[i] = array->strides()[i];
+            }
+
+            outputs.push_back(res);
+            nodes.push_back(array->node.get());
+        }
+
+        evalNodes(outputs, nodes);
+
+        for (int i = 0; i < (int)arrays.size(); i++) {
+            Array<T> *array = arrays[i];
+
+            if (array->isReady()) continue;
+            array->ready = true;
+            // FIXME: Replace the current node in any JIT possible trees with the new BufferNode
+            array->node = bufferNodePtr<T>();
+        }
+        return;
+    }
+
+    template<typename T>
     Array<T>::~Array() {}
+
+    template<typename T>
+    Node_ptr Array<T>::getNode()
+    {
+        if (node->isBuffer()) {
+            unsigned bytes = this->getDataDims().elements() * sizeof(T);
+            BufferNode<T> *bufNode = reinterpret_cast<BufferNode<T> *>(node.get());
+            Param<T> param = *this;
+            bufNode->setData(param, data, bytes, isLinear());
+        }
+        return node;
+    }
 
     template<typename T>
     Node_ptr Array<T>::getNode() const
     {
-        if (!node) {
-            bool is_linear = isLinear();
-            unsigned bytes = this->getDataDims().elements() * sizeof(T);
-            BufferNode<T> *buf_node = new BufferNode<T>(irname<T>(),
-                                                        afShortName<T>(), data,
-                                                        *this, bytes, is_linear);
-            const_cast<Array<T> *>(this)->node = Node_ptr(reinterpret_cast<Node *>(buf_node));
+        if (node->isBuffer()) {
+            return const_cast<Array<T> *>(this)->getNode();
         }
-
         return node;
     }
 
@@ -136,16 +221,31 @@ namespace cuda
     {
         Array<T> out =  Array<T>(dims, node);
 
-        unsigned length =0, buf_count = 0, bytes = 0;
+        if (evalFlag()) {
 
-        Node *n = node.get();
-        n->getInfo(length, buf_count, bytes);
-        n->resetFlags();
+            if (node->getHeight() >= (int)getMaxJitSize()) {
+                out.eval();
+            } else {
+                size_t alloc_bytes, alloc_buffers;
+                size_t lock_bytes, lock_buffers;
 
-        if (length > MAX_JIT_LEN ||
-            buf_count >= MAX_BUFFERS ||
-            bytes >= MAX_BYTES) {
-            out.eval();
+                deviceMemoryInfo(&alloc_bytes, &alloc_buffers,
+                                 &lock_bytes, &lock_buffers);
+
+                // Check if approaching the memory limit
+                if (lock_bytes > getMaxBytes() ||
+                    lock_buffers > getMaxBuffers()) {
+
+                    unsigned length =0, buf_count = 0, bytes = 0;
+                    Node *n = node.get();
+                    n->getInfo(length, buf_count, bytes);
+                    n->resetFlags();
+
+                    if (2 * bytes > lock_bytes) {
+                        out.eval();
+                    }
+                }
+            }
         }
 
         return out;
@@ -191,18 +291,23 @@ namespace cuda
         dim4 dDims = parent.getDataDims();
         dim4 pDims = parent.dims();
 
-        dim4 dims   = toDims  (index, pDims);
-        dim4 offset = toOffset(index, dDims);
-        dim4 stride = toStride (index, dDims);
+        dim4 dims    = toDims  (index, pDims);
+        dim4 strides = toStride (index, dDims);
 
-        Array<T> out = Array<T>(parent, dims, offset, stride);
+        // Find total offsets after indexing
+        dim4 offsets = toOffset(index, pDims);
+        dim4 parent_strides = parent.strides();
+        dim_t offset = parent.getOffset();
+        for (int i = 0; i < 4; i++) offset += offsets[i] * parent_strides[i];
+
+        Array<T> out = Array<T>(parent, dims, offset, strides);
 
         if (!copy) return out;
 
-        if (stride[0] != 1 ||
-            stride[1] <  0 ||
-            stride[2] <  0 ||
-            stride[3] <  0) {
+        if (strides[0] != 1 ||
+            strides[1] <  0 ||
+            strides[2] <  0 ||
+            strides[3] <  0) {
 
             out = copyArray(out);
         }
@@ -223,24 +328,18 @@ namespace cuda
     }
 
     template<typename T>
-    void evalArray(const Array<T> &A)
-    {
-        A.eval();
-    }
-
-    template<typename T>
     void
     writeHostDataArray(Array<T> &arr, const T * const data, const size_t bytes)
     {
         if (!arr.isOwner()) {
-            arr = createEmptyArray<T>(arr.dims());
+            arr = copyArray<T>(arr);
         }
 
         T *ptr = arr.get();
 
-        CUDA_CHECK(cudaMemcpy(ptr + arr.getOffset(), data,
-                              bytes,
-                              cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(ptr, data, bytes, cudaMemcpyHostToDevice,
+                    cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
 
         return;
     }
@@ -250,14 +349,14 @@ namespace cuda
     writeDeviceDataArray(Array<T> &arr, const void * const data, const size_t bytes)
     {
         if (!arr.isOwner()) {
-            arr = createEmptyArray<T>(arr.dims());
+            arr = copyArray<T>(arr);
         }
 
         T *ptr = arr.get();
 
-        CUDA_CHECK(cudaMemcpy(ptr + arr.getOffset(), data,
-                              bytes,
-                              cudaMemcpyDeviceToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(ptr, data,
+                                   bytes, cudaMemcpyDeviceToDevice,
+                                   cuda::getStream(cuda::getActiveDeviceId())));
 
         return;
     }
@@ -273,13 +372,20 @@ namespace cuda
                                                        const std::vector<af_seq> &index, \
                                                        bool copy);      \
     template       void      destroyArray<T>          (Array<T> *A);    \
-    template       void      evalArray<T>             (const Array<T> &A); \
     template       Array<T>  createNodeArray<T>       (const dim4 &size, JIT::Node_ptr node); \
+    template       Array<T>::Array(af::dim4 dims, af::dim4 strides, dim_t offset, \
+                                   const T * const in_data,             \
+                                   bool is_device);                     \
+    template       Array<T>::Array(af::dim4 dims, const T * const in_data, \
+                                   bool is_device, bool copy_device);   \
     template       Array<T>::~Array        ();                          \
+    template       Node_ptr Array<T>::getNode() const;                  \
     template       void Array<T>::eval();                               \
     template       void Array<T>::eval() const;                         \
+    template       T*   Array<T>::device();                             \
     template       void      writeHostDataArray<T>    (Array<T> &arr, const T * const data, const size_t bytes); \
     template       void      writeDeviceDataArray<T>  (Array<T> &arr, const void * const data, const size_t bytes); \
+    template       void      evalMultiple<T>     (std::vector<Array<T>*> arrays); \
 
     INSTANTIATE(float)
     INSTANTIATE(double)
@@ -291,5 +397,7 @@ namespace cuda
     INSTANTIATE(char)
     INSTANTIATE(intl)
     INSTANTIATE(uintl)
+    INSTANTIATE(short)
+    INSTANTIATE(ushort)
 
 }

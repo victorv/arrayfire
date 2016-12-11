@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <ops.hpp>
 #include <backend.hpp>
 #include <Param.hpp>
@@ -199,16 +198,16 @@ namespace kernel
 
         switch (threads_y) {
         case 8:
-            (ireduce_dim_kernel<T, op, dim, is_first, 8>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_dim_kernel<T, op, dim, is_first, 8>), blocks, threads,
                 out, olptr, in, ilptr, blocks_dim[0], blocks_dim[1], blocks_dim[dim]); break;
         case 4:
-            (ireduce_dim_kernel<T, op, dim, is_first, 4>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_dim_kernel<T, op, dim, is_first, 4>), blocks, threads,
                 out, olptr, in, ilptr, blocks_dim[0], blocks_dim[1], blocks_dim[dim]); break;
         case 2:
-            (ireduce_dim_kernel<T, op, dim, is_first, 2>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_dim_kernel<T, op, dim, is_first, 2>), blocks, threads,
                 out, olptr, in, ilptr, blocks_dim[0], blocks_dim[1], blocks_dim[dim]); break;
         case 1:
-            (ireduce_dim_kernel<T, op, dim, is_first, 1>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_dim_kernel<T, op, dim, is_first, 1>), blocks, threads,
                 out, olptr, in, ilptr, blocks_dim[0], blocks_dim[1], blocks_dim[dim]); break;
         }
 
@@ -377,16 +376,16 @@ namespace kernel
 
         switch (threads_x) {
         case 32:
-            (ireduce_first_kernel<T, op, is_first,  32>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_first_kernel<T, op, is_first,  32>), blocks, threads,
                 out, olptr, in, ilptr, blocks_x, blocks_y, repeat); break;
         case 64:
-            (ireduce_first_kernel<T, op, is_first,  64>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_first_kernel<T, op, is_first,  64>), blocks, threads,
                 out, olptr, in, ilptr, blocks_x, blocks_y, repeat); break;
         case 128:
-            (ireduce_first_kernel<T, op, is_first,  128>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_first_kernel<T, op, is_first,  128>), blocks, threads,
                 out, olptr, in, ilptr, blocks_x, blocks_y, repeat); break;
         case 256:
-            (ireduce_first_kernel<T, op, is_first,  256>)<<<blocks, threads>>>(
+            CUDA_LAUNCH((ireduce_first_kernel<T, op, is_first,  256>), blocks, threads,
                 out, olptr, in, ilptr, blocks_x, blocks_y, repeat); break;
         }
 
@@ -444,7 +443,7 @@ namespace kernel
     template<typename T, af_op_t op>
     T ireduce_all(uint *idx, CParam<T> in)
     {
-        int in_elements = in.strides[3] * in.dims[3];
+        int in_elements = in.dims[0] * in.dims[1] * in.dims[2] * in.dims[3];
 
         // FIXME: Use better heuristics to get to the optimum number
         if (in_elements > 4096) {
@@ -492,10 +491,24 @@ namespace kernel
             T*      h_ptr_raw = h_ptr.get();
             uint*   h_lptr_raw = h_lptr.get();
 
-            CUDA_CHECK(cudaMemcpy(h_ptr_raw, tmp.ptr, tmp_elements * sizeof(T), cudaMemcpyDeviceToHost));
-            CUDA_CHECK(cudaMemcpy(h_lptr_raw, tlptr, tmp_elements * sizeof(uint), cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpyAsync(h_ptr_raw, tmp.ptr, tmp_elements * sizeof(T),
+                       cudaMemcpyDeviceToHost, cuda::getStream(cuda::getActiveDeviceId())));
+            CUDA_CHECK(cudaMemcpyAsync(h_lptr_raw, tlptr, tmp_elements * sizeof(uint),
+                       cudaMemcpyDeviceToHost, cuda::getStream(cuda::getActiveDeviceId())));
+            CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
             memFree(tmp.ptr);
             memFree(tlptr);
+
+            if (!is_linear) {
+                // Converting n-d index into a linear index
+                // in is of size   [   dims0, dims1, dims2, dims3]
+                // tidx is of size [blocks_x, dims1, dims2, dims3]
+                // i / blocks_x gives you the batch number "N"
+                // "N * dims0 + i" gives the linear index
+                for (int i = 0; i < tmp_elements; i++) {
+                    h_lptr_raw[i] += (i / blocks_x) * in.dims[0];
+                }
+            }
 
             MinMaxOp<op, T> Op(h_ptr_raw[0], h_lptr_raw[0]);
 
@@ -509,7 +522,9 @@ namespace kernel
 
             scoped_ptr<T> h_ptr(new T[in_elements]);
             T* h_ptr_raw = h_ptr.get();
-            CUDA_CHECK(cudaMemcpy(h_ptr_raw, in.ptr, in_elements * sizeof(T), cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpyAsync(h_ptr_raw, in.ptr, in_elements * sizeof(T),
+                       cudaMemcpyDeviceToHost, cuda::getStream(cuda::getActiveDeviceId())));
+            CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
 
             MinMaxOp<op, T> Op(h_ptr_raw[0], 0);
             for (int i = 1; i < in_elements; i++) {

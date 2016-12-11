@@ -32,13 +32,15 @@ namespace af
         ///
         /// \brief Updates the internal \ref af_array object
         ///
-        /// /note This function will reduce the reference of the previous
+        /// \note This function will reduce the reference of the previous
         ///       \ref af_array object
         ///
         void set(af_array tmp);
 
         ///
-        /// \brief Intermediate data class. Used for assignment and indexing
+        /// \brief Intermediate data class. Used for assignment and indexing.
+        ///
+        /// \note This class is for internal book keeping while indexing. This class is not intended for use in user code.
         ///
         class AFAPI array_proxy
         {
@@ -82,6 +84,19 @@ namespace af
             ASSIGN(/=)
 #undef ASSIGN
 
+#if AF_API_VERSION >= 32
+#define ASSIGN(OP)                                                  \
+            array_proxy& operator OP(const short &a);               \
+            array_proxy& operator OP(const unsigned short &a);      \
+
+            ASSIGN(=)
+            ASSIGN(+=)
+            ASSIGN(-=)
+            ASSIGN(*=)
+            ASSIGN(/=)
+#undef ASSIGN
+#endif
+
             // af::array member functions. same behavior as those below
             af_array get();
             af_array get() const;
@@ -93,6 +108,7 @@ namespace af
             dim_t dims(unsigned dim) const;
             unsigned numdims() const;
             size_t bytes() const;
+            size_t allocated() const;
             array copy() const;
             bool isempty() const;
             bool isscalar() const;
@@ -107,6 +123,9 @@ namespace af
             bool isfloating() const;
             bool isinteger() const;
             bool isbool() const;
+#if AF_API_VERSION >= 34
+            bool issparse() const;
+#endif
             void eval() const;
             array as(dtype type) const;
             array T() const;
@@ -114,7 +133,13 @@ namespace af
             template<typename T> T scalar() const;
             template<typename T> T* device() const;
             void unlock() const;
+#if AF_API_VERSION >= 31
             void lock() const;
+#endif
+
+#if AF_API_VERSION >= 34
+            bool isLocked() const;
+#endif
 
                   array::array_proxy row(int index);
             const array::array_proxy row(int index) const;
@@ -295,15 +320,6 @@ namespace af
         /**
             Create a column vector on the device using a host/device pointer
 
-            This function can be used to transfer data from a host or device
-            pointer to an array object on the device with one column. The type
-            of the array is automatically matched to the type of the data.
-
-            Depending on the specified size of the column vector, the data will
-            be copied partially or completely. However, the user needs to be
-            careful to ensure that the array size is not larger than the number
-            of elements in the input buffer.
-
             \param[in] dim0     number of elements in the column vector
             \param[in] pointer  pointer (points to a buffer on the host/device)
             \param[in] src      source of the data (default is afHost, can also
@@ -321,6 +337,9 @@ namespace af
                                     //   = 99
 
             \endcode
+
+            \note If \p src is \ref afHost, the first \p dim0 elements are copied. If \p src is \ref afDevice, no copy is done; the array object wraps the device pointer AND takes ownership of the underlying memory.
+
         */
         template<typename T>
         array(dim_t dim0,
@@ -329,14 +348,6 @@ namespace af
 
         /**
             Create a 2D array on the device using a host/device pointer
-
-            This function copies data from the location specified by the
-            pointer to a 2D array on the device. The data is arranged in
-            "column-major" format (similar to that used by FORTRAN).
-
-            Note that this is a synchronous copy. The elements are not
-            actually filled until this array is evaluated or used in the
-            evaluation of some other expression that uses this array object.
 
             \param[in] dim0     number of rows
             \param[in] dim1     number of columns
@@ -350,6 +361,8 @@ namespace af
             \endcode
 
             \image html 2dArray.png
+
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 elements are copied. If \p src is \ref afDevice, no copy is done; the array object wraps the device pointer AND takes ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
         */
         template<typename T>
         array(dim_t dim0, dim_t dim1,
@@ -358,10 +371,6 @@ namespace af
 
         /**
             Create a 3D array on the device using a host/device pointer
-
-            This function copies data from the location specified by the pointer
-            to a 3D array on the device. The data is arranged in "column-major"
-            format (similar to that used by FORTRAN).
 
             \param[in] dim0     first dimension
             \param[in] dim1     second dimension
@@ -377,6 +386,8 @@ namespace af
             array A(3, 3, 2,  h_buffer);   // copy host data to 3D device array
             \endcode
 
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 * \p dim2 elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
+
             \image html 3dArray.png
         */
         template<typename T>
@@ -386,10 +397,6 @@ namespace af
 
         /**
             Create a 4D array on the device using a host/device pointer
-
-            This function copies data from the location specified by the pointer
-            to a 4D array on the device. The data is arranged in "column-major"
-            format (similar to that used by FORTRAN).
 
             \param[in] dim0     first dimension
             \param[in] dim1     second dimension
@@ -407,6 +414,8 @@ namespace af
 
             array A(2, 2, 2, 2, h_buffer);   // copy host data to 4D device array
             \endcode
+
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 * \p dim2 * \p dim3 elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
         */
         template<typename T>
         array(dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3,
@@ -442,6 +451,8 @@ namespace af
                                              // Note the "column-major" ordering
                                              // used in ArrayFire
             \endcode
+
+            \note If \p src is \ref afHost, the first dims.elements() elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
         */
         template<typename T>
         explicit
@@ -577,6 +588,12 @@ namespace af
         size_t bytes() const;
 
         /**
+           Get the size of the array in memory. This will return the parent's
+           bytes() if the array is indexed.
+        */
+        size_t allocated() const;
+
+        /**
            Perform deep copy of the array
         */
         array copy() const;
@@ -637,7 +654,7 @@ namespace af
         bool isfloating() const;
 
         /**
-           \brief Returns true if the array type is \ref u8, \ref b8, \ref s32 \ref u32, \ref s64, \ref u64
+           \brief Returns true if the array type is \ref u8, \ref b8, \ref s32 \ref u32, \ref s64, \ref u64, \ref s16, \ref u16
         */
         bool isinteger() const;
 
@@ -645,6 +662,13 @@ namespace af
            \brief Returns true if the array type is \ref b8
         */
         bool isbool() const;
+
+#if AF_API_VERSION >= 34
+        /**
+           \brief Returns true if the array is a sparse array
+        */
+        bool issparse() const;
+#endif
 
         /**
            \brief Evaluate any JIT expressions to generate data for the array
@@ -666,8 +690,10 @@ namespace af
         /**
            \defgroup device_func_device array::device<T>
 
-           Get the device pointer from the array
+           Get the device pointer from the array and lock the buffer in memory manager.
            @{
+
+           The device memory returned by this function is not freed until unlock() is called.
 
            \ingroup arrayfire_func
            \ingroup device_mat
@@ -680,47 +706,65 @@ namespace af
         // INDEXING
         // Single arguments
 
+        /**
+            \brief This operator returns a reference of the original array at a given coordinate.
 
-        /// \ingroup array_mem_operator_paren
-        /// @{
-        ///
-        /// \brief Gets a reference to a set of linear elements
-        ///
-        /// \copydetails array_mem_operator_paren_one
-        ///
-        /// \param[in] s0   is sequence of linear indices
-        ///
-        /// \returns A reference to the array at the given index
-        ///
-              array::array_proxy operator()(const index &s0);
+            You can pass \ref af::seq, \ref af::array, or an int as it's parameters.
+            These references can be used for assignment or returning references
+            to \ref af::array objects.
 
-        /// \copydoc operator()(const index &)
+            If the \ref af::array is a multi-dimensional array then this coordinate
+            will treated as the data as a linear array.
+
+            \param[in] s0   is sequence of linear indices
+
+            \returns A reference to the array at the given index
+
+            \ingroup array_mem_operator_paren
+
+        */
+        array::array_proxy operator()(const index &s0);
+
+        /**
+            \copydoc operator()(const index &)
+
+            \ingroup array_mem_operator_paren
+        */
         const array::array_proxy operator()(const index &s0) const;
 
 
-        ///
-        /// \brief Gets a reference to a sub array
-        ///
-        /// \copydetails array_mem_operator_paren_many
-        ///
-        /// \param[in] s0   is sequence of indices along the first dimension
-        /// \param[in] s1   is sequence of indices along the second dimension
-        /// \param[in] s2   is sequence of indices along the third dimension
-        /// \param[in] s3   is sequence of indices along the fourth dimension
-        ///
-        /// \returns A reference to the array at the given index
-        ///
-              array::array_proxy operator()(const index &s0,
-                                            const index &s1,
-                                            const index &s2 = span,
-                                            const index &s3 = span);
+        /**
+            \brief This operator returns a reference of the original array at a
+            given coordinate.
 
-        /// \copydoc operator()(const index &, const index &, const index &, const index &)
+            You can pass \ref af::seq, \ref af::array, or an int as it's parameters.
+            These references can be used for assignment or returning references
+            to \ref af::array objects.
+
+            \param[in] s0   is sequence of indices along the first dimension
+            \param[in] s1   is sequence of indices along the second dimension
+            \param[in] s2   is sequence of indices along the third dimension
+            \param[in] s3   is sequence of indices along the fourth dimension
+
+            \returns A reference to the array at the given index
+
+            \ingroup array_mem_operator_paren
+        */
+        array::array_proxy operator()(const index &s0,
+                                      const index &s1,
+                                      const index &s2 = span,
+                                      const index &s3 = span);
+
+        /**
+            \copydoc operator()(const index &, const index &, const index &, const index &)
+
+            \ingroup array_mem_operator_paren
+        */
         const array::array_proxy operator()(const index &s0,
                                             const index &s1,
                                             const index &s2 = span,
                                             const index &s3 = span) const;
-        /// @}
+
 
         /// \ingroup array_mem_row
         /// @{
@@ -812,11 +856,18 @@ namespace af
 
         ~array();
 
-        // Transpose and Conjugate Tranpose
+        /// \brief Get the transposed the array
+        ///
+        /// \returns Transposed matrix
+        /// \ingroup method_mat
         array T() const;
+        /// \brief Get the conjugate-transpose of the current array
+        ///
+        /// \returns conjugate-transpose matrix
+        /// \ingroup method_mat
         array H() const;
 
-#define ASSIGN(OP)                                                                      \
+#define ASSIGN_(OP)                                                                     \
         array& OP(const array &val);                                                    \
         array& OP(const double &val);              /**< \copydoc OP (const array &) */  \
         array& OP(const cdouble &val);             /**< \copydoc OP (const array &) */  \
@@ -831,6 +882,17 @@ namespace af
         array& OP(const unsigned long &val);       /**< \copydoc OP (const array &) */  \
         array& OP(const long long  &val);          /**< \copydoc OP (const array &) */  \
         array& OP(const unsigned long long &val);  /**< \copydoc OP (const array &) */  \
+
+#if AF_API_VERSION >= 32
+#define ASSIGN(OP)                                                                      \
+        ASSIGN_(OP)                                                                     \
+        array& OP(const short  &val);              /**< \copydoc OP (const array &) */  \
+        array& OP(const unsigned short &val);      /**< \copydoc OP (const array &) */  \
+
+#else
+#define ASSIGN(OP) ASSIGN_(OP)
+#endif
+
 
         /// \ingroup array_mem_operator_eq
         /// @{
@@ -895,6 +957,7 @@ namespace af
 
 
 #undef ASSIGN
+#undef ASSIGN_
 
         ///
         /// \brief Negates the values of the array
@@ -921,8 +984,19 @@ namespace af
         /// \brief Locks the device buffer in the memory manager.
         ///
         /// This method can be called to take control of the device pointer from the memory manager.
-        /// While a buffer is locked, the memory manager does not free the memory.
+        /// While a buffer is locked, the memory manager doesn't free the memory until unlock() is invoked.
         void lock() const;
+
+
+#if AF_API_VERSION >= 34
+        ///
+        /// \brief Query if the array has been locked by the user.
+        ///
+        /// An array can be locked by the user by calling `arry.lock` or `arr.device`
+        /// or `getRawPtr` function.
+        bool isLocked() const;
+#endif
+
 
         ///
         /// \brief Unlocks the device buffer in the memory manager.
@@ -933,7 +1007,7 @@ namespace af
     };
     // end of class array
 
-#define BIN_OP(OP)                                                                                                       \
+#define BIN_OP_(OP)                                                                                                      \
     AFAPI array OP (const array& lhs, const array& rhs);                                                                 \
     AFAPI array OP (const bool& lhs, const array& rhs);                 /**< \copydoc OP (const array&, const array&) */ \
     AFAPI array OP (const int& lhs, const array& rhs);                  /**< \copydoc OP (const array&, const array&) */ \
@@ -961,6 +1035,18 @@ namespace af
     AFAPI array OP (const array& lhs, const float& rhs);                /**< \copydoc OP (const array&, const array&) */ \
     AFAPI array OP (const array& lhs, const cfloat& rhs);               /**< \copydoc OP (const array&, const array&) */ \
     AFAPI array OP (const array& lhs, const cdouble& rhs);              /**< \copydoc OP (const array&, const array&) */ \
+
+#if AF_API_VERSION >= 32
+#define BIN_OP(OP)                                                                                                       \
+        BIN_OP_(OP)                                                                                                      \
+        AFAPI array OP (const short& lhs, const array& rhs);            /**< \copydoc OP (const array&, const array&) */ \
+        AFAPI array OP (const unsigned short& lhs, const array& rhs);   /**< \copydoc OP (const array&, const array&) */ \
+        AFAPI array OP (const array& lhs, const short& rhs);            /**< \copydoc OP (const array&, const array&) */ \
+        AFAPI array OP (const array& lhs, const unsigned short& rhs);   /**< \copydoc OP (const array&, const array&) */ \
+
+#else
+#define BIN_OP(OP) BIN_OP_(OP)
+#endif
 
     /// \ingroup arith_func_add
     /// @{
@@ -1013,7 +1099,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns an array with the equality operation performed on each element
+    /// \returns an array of type b8 with the equality operation performed on each element
     BIN_OP(operator==)
     /// @}
 
@@ -1024,7 +1110,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with the != operation performed on each element
+    /// \returns    an array of type b8 with the != operation performed on each element
     ///             of \p lhs and \p rhs
     BIN_OP(operator!=)
     /// @}
@@ -1036,7 +1122,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with the < operation performed on each element
+    /// \returns    an array of type b8 with the < operation performed on each element
     ///             of \p lhs and \p rhs
     BIN_OP(operator< )
     /// @}
@@ -1048,7 +1134,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with the <= operation performed on each element
+    /// \returns    an array of type b8 with the <= operation performed on each element
     ///             of \p lhs and \p rhs
     BIN_OP(operator<=)
     /// @}
@@ -1060,7 +1146,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with the > operation performed on each element
+    /// \returns    an array of type b8 with the > operation performed on each element
     ///             of \p lhs and \p rhs
     BIN_OP(operator> )
     /// @}
@@ -1072,7 +1158,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with the >= operation performed on each element
+    /// \returns    an array of type b8 with the >= operation performed on each element
     ///             of \p lhs and \p rhs
     BIN_OP(operator>=)
     /// @}
@@ -1085,7 +1171,7 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with a logical AND operation performed on each
+    /// \returns    an array of type b8 with a logical AND operation performed on each
     ///             element of \p lhs and \p rhs
     BIN_OP(operator&&)
     /// @}
@@ -1098,12 +1184,12 @@ namespace af
     /// \param[in] lhs the left hand side value of the operand
     /// \param[in] rhs the right hand side value of the operand
     ///
-    /// \returns    an array with a logical OR operation performed on each
+    /// \returns    an array of type b8 with a logical OR operation performed on each
     ///             element of \p lhs and \p rhs
     BIN_OP(operator||)
     /// @}
 
-    /// \ingroup numeric_func_mod
+    /// \ingroup arith_func_mod
     /// @{
     /// \brief Performs an modulo operation on two arrays or an array and a value.
     ///
@@ -1181,6 +1267,7 @@ namespace af
     /// @}
 
 #undef BIN_OP
+#undef BIN_OP_
 
     /// Evaluate an expression (nonblocking).
     /**
@@ -1188,11 +1275,77 @@ namespace af
        @{
     */
     inline array &eval(array &a) { a.eval(); return a; }
-    inline void eval(array &a, array &b) { eval(a); b.eval(); }
-    inline void eval(array &a, array &b, array &c) { eval(a, b); c.eval(); }
-    inline void eval(array &a, array &b, array &c, array &d) { eval(a, b, c); d.eval(); }
-    inline void eval(array &a, array &b, array &c, array &d, array &e) { eval(a, b, c, d); e.eval(); }
-    inline void eval(array &a, array &b, array &c, array &d, array &e, array &f) { eval(a, b, c, d, e); f.eval(); }
+
+#if AF_API_VERSION >= 34
+    ///
+    /// Evaluate multiple arrays simultaneously
+    ///
+    AFAPI void eval(int num, array **arrays);
+#endif
+
+    inline void eval(array &a, array &b)
+    {
+#if AF_API_VERSION >= 34
+        array *arrays[] = {&a, &b};
+        return eval(2, arrays);
+#else
+        eval(a); b.eval();
+#endif
+    }
+
+    inline void eval(array &a, array &b, array &c)
+    {
+#if AF_API_VERSION >= 34
+        array *arrays[] = {&a, &b, &c};
+        return eval(3, arrays);
+#else
+        eval(a, b); c.eval();
+#endif
+    }
+
+    inline void eval(array &a, array &b, array &c, array &d)
+    {
+#if AF_API_VERSION >= 34
+        array *arrays[] = {&a, &b, &c, &d};
+        return eval(4, arrays);
+#else
+        eval(a, b, c); d.eval();
+#endif
+
+    }
+
+    inline void eval(array &a, array &b, array &c, array &d, array &e)
+    {
+#if AF_API_VERSION >= 34
+        array *arrays[] = {&a, &b, &c, &d, &e};
+        return eval(5, arrays);
+#else
+        eval(a, b, c, d); e.eval();
+#endif
+    }
+
+    inline void eval(array &a, array &b, array &c, array &d, array &e, array &f)
+    {
+#if AF_API_VERSION >= 34
+        array *arrays[] = {&a, &b, &c, &d, &e, &f};
+        return eval(6, arrays);
+#else
+        eval(a, b, c, d, e); f.eval();
+#endif
+    }
+
+#if AF_API_VERSION >= 34
+    ///
+    /// Turn the manual eval flag on or off
+    ///
+    AFAPI void setManualEvalFlag(bool flag);
+#endif
+
+#if AF_API_VERSION >= 34
+    /// Get the manual eval flag
+    AFAPI bool getManualEvalFlag();
+#endif
+
     /**
        @}
     */
@@ -1203,6 +1356,7 @@ namespace af
 #ifdef __cplusplus
 extern "C" {
 #endif
+
     /**
        \ingroup construct_mat
        @{
@@ -1269,6 +1423,7 @@ extern "C" {
     */
     AFAPI af_err af_retain_array(af_array *out, const af_array in);
 
+#if AF_API_VERSION >= 31
     /**
        \ingroup method_mat
        @{
@@ -1276,6 +1431,7 @@ extern "C" {
        Get the use count of `af_array`
     */
     AFAPI af_err af_get_data_ref_count(int *use_count, const af_array in);
+#endif
 
 
     /**
@@ -1287,6 +1443,235 @@ extern "C" {
       @}
     */
 
+
+#if AF_API_VERSION >= 34
+    /**
+       Evaluate multiple arrays together
+    */
+    AFAPI af_err af_eval_multiple(const int num, af_array *arrays);
+    /**
+      @}
+    */
+#endif
+
+#if AF_API_VERSION >= 34
+    /**
+       Turn the manual eval flag on or off
+    */
+    AFAPI af_err af_set_manual_eval_flag(bool flag);
+    /**
+      @}
+    */
+#endif
+
+#if AF_API_VERSION >= 34
+    /**
+       Get the manual eval flag
+    */
+    AFAPI af_err af_get_manual_eval_flag(bool *flag);
+    /**
+      @}
+    */
+#endif
+
+    /**
+        \ingroup method_mat
+        @{
+    */
+    /**
+        \brief Gets the number of elements in an array.
+
+        \param[out] elems is the output that contains number of elements of \p arr
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_get_elements(dim_t *elems, const af_array arr);
+
+    /**
+        \brief Gets the type of an array.
+
+        \param[out] type is the output that contains the type of \p arr
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_get_type(af_dtype *type, const af_array arr);
+
+    /**
+        \brief Gets the dimseions of an array.
+
+        \param[out] d0 is the output that contains the size of first dimension of \p arr
+        \param[out] d1 is the output that contains the size of second dimension of \p arr
+        \param[out] d2 is the output that contains the size of third dimension of \p arr
+        \param[out] d3 is the output that contains the size of fourth dimension of \p arr
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_get_dims(dim_t *d0, dim_t *d1, dim_t *d2, dim_t *d3,
+                             const af_array arr);
+
+    /**
+        \brief Gets the number of dimensions of an array.
+
+        \param[out] result is the output that contains the number of dims of \p arr
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_get_numdims(unsigned *result, const af_array arr);
+
+    /**
+        \brief Check if an array is empty.
+
+        \param[out] result is true if elements of arr is 0, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_empty        (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is scalar, ie. single element.
+
+        \param[out] result is true if elements of arr is 1, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_scalar       (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is row vector.
+
+        \param[out] result is true if arr has dims [1 x 1 1], false otherwise
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_row          (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is a column vector
+
+        \param[out] result is true if arr has dims [x 1 1 1], false otherwise
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_column       (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is a vector
+
+        A vector is any array that has exactly 1 dimension not equal to 1.
+
+        \param[out] result is true if arr is a vector, false otherwise
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_vector       (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is complex type
+
+        \param[out] result is true if arr is of type \ref c32 or \ref c64, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_complex      (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is real type
+
+        This is mutually exclusive to \ref af_is_complex
+
+        \param[out] result is true if arr is NOT of type \ref c32 or \ref c64, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_real         (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is double precision type
+
+        \param[out] result is true if arr is of type \ref f64 or \ref c64, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_double       (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is single precision type
+
+        \param[out] result is true if arr is of type \ref f32 or \ref c32, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_single       (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is real floating point type
+
+        \param[out] result is true if arr is of type \ref f32 or \ref f64, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_realfloating (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is floating precision type
+
+        This is a combination of \ref af_is_realfloating and \ref af_is_complex
+
+        \param[out] result is true if arr is of type \ref f32, \ref f64, \ref c32 or \ref c64, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_floating     (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is integer type
+
+        \param[out] result is true if arr is of integer types, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_integer      (bool *result, const af_array arr);
+
+    /**
+        \brief Check if an array is bool type
+
+        \param[out] result is true if arr is of \ref b8 type, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_bool         (bool *result, const af_array arr);
+
+#if AF_API_VERSION >= 34
+    /**
+        \brief Check if an array is sparse
+
+        \param[out] result is true if arr is sparse, otherwise false
+        \param[in] arr is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_sparse       (bool *result, const af_array arr);
+    /**
+        @}
+    */
+#endif
 #ifdef __cplusplus
 }
 #endif

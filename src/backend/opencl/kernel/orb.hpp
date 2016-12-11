@@ -12,11 +12,11 @@
 #include <dispatch.hpp>
 #include <err_opencl.hpp>
 #include <debug_opencl.hpp>
-#include <convolve_common.hpp>
 #include <kernel/convolve_separable.hpp>
 #include <kernel/fast.hpp>
 #include <kernel/resize.hpp>
-#include <kernel/sort_index.hpp>
+#include <kernel/sort_by_key.hpp>
+#include <kernel/range.hpp>
 #include <kernel_headers/orb.hpp>
 #include <memory.hpp>
 #include <vector>
@@ -28,6 +28,25 @@ using cl::EnqueueArgs;
 using cl::LocalSpaceArg;
 using cl::NDRange;
 using std::vector;
+
+#if defined(__clang__)
+    /* Clang/LLVM */
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wsometimes-uninitialized"
+#elif defined(__ICC) || defined(__INTEL_COMPILER)
+    /* Intel ICC/ICPC */
+    // Fix the warning code here, if any
+#elif defined(__GNUC__) || defined(__GNUG__)
+    /* GNU GCC/G++ */
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#elif defined(_MSC_VER)
+    /* Microsoft Visual Studio */
+    #pragma warning( push )
+    #pragma warning( disable : 4700 )
+#else
+    /* Other */
+#endif
 
 namespace opencl
 {
@@ -201,8 +220,8 @@ void orb(unsigned* out_feat,
             unsigned edge = ceil(size * sqrt(2.f) / 2.f);
 
             // Detect FAST features
-            fast<T, 9, true>(&lvl_feat, d_x_feat, d_y_feat, d_score_feat,
-                             lvl_img, fast_thr, 0.15f, edge);
+            fast<T, true>(9, &lvl_feat, d_x_feat, d_y_feat, d_score_feat,
+                          lvl_img, fast_thr, 0.15f, edge);
 
             if (lvl_feat == 0) {
                 feat_pyr[i] = 0;
@@ -232,7 +251,7 @@ void orb(unsigned* out_feat,
             unsigned block_size = 7;
             float k_thr = 0.04f;
 
-            auto hrOp = make_kernel<Buffer, Buffer, Buffer,
+            auto hrOp = KernelFunctor<Buffer, Buffer, Buffer,
                                     Buffer, Buffer, const unsigned,
                                     Buffer, Buffer, KParam,
                                     const unsigned, const float, const unsigned> (*hrKernel[device]);
@@ -284,9 +303,11 @@ void orb(unsigned* out_feat,
             d_harris_sorted.info.offset = 0;
             d_harris_idx.info.offset = 0;
             d_harris_sorted.data = d_score_harris;
+            // Create indices using range
             d_harris_idx.data = bufferAlloc((d_harris_idx.info.dims[0]) * sizeof(unsigned));
+            kernel::range<uint>(d_harris_idx, 0);
 
-            sort0_index<float, false>(d_harris_sorted, d_harris_idx);
+            kernel::sort0ByKey<float, uint>(d_harris_sorted, d_harris_idx, false);
 
             cl::Buffer* d_x_lvl = bufferAlloc(usable_feat * sizeof(float));
             cl::Buffer* d_y_lvl = bufferAlloc(usable_feat * sizeof(float));
@@ -299,7 +320,7 @@ void orb(unsigned* out_feat,
             const NDRange local_keep(ORB_THREADS, 1);
             const NDRange global_keep(keep_blk * ORB_THREADS, 1);
 
-            auto kfOp = make_kernel<Buffer, Buffer, Buffer,
+            auto kfOp = KernelFunctor<Buffer, Buffer, Buffer,
                                     Buffer, Buffer, Buffer, Buffer,
                                     const unsigned> (*kfKernel[device]);
 
@@ -322,7 +343,7 @@ void orb(unsigned* out_feat,
             const NDRange local_centroid(ORB_THREADS_X, ORB_THREADS_Y);
             const NDRange global_centroid(centroid_blk_x * ORB_THREADS_X, ORB_THREADS_Y);
 
-            auto caOp = make_kernel<Buffer, Buffer, Buffer,
+            auto caOp = KernelFunctor<Buffer, Buffer, Buffer,
                                     const unsigned, Buffer, KParam,
                                     const unsigned> (*caKernel[device]);
 
@@ -360,8 +381,8 @@ void orb(unsigned* out_feat,
                 }
 
                 // Filter level image with Gaussian kernel to reduce noise sensitivity
-                convolve2<T, convAccT, 0, false, gauss_len>(lvl_tmp, lvl_img, gauss_filter);
-                convolve2<T, convAccT, 1, false, gauss_len>(lvl_filt, lvl_tmp, gauss_filter);
+                convSep<T, convAccT, 0, false>(lvl_tmp, lvl_img, gauss_filter);
+                convSep<T, convAccT, 1, false>(lvl_filt, lvl_tmp, gauss_filter);
 
                 bufferFree(lvl_tmp.data);
             }
@@ -373,7 +394,7 @@ void orb(unsigned* out_feat,
                 getQueue().enqueueWriteBuffer(*d_desc_lvl, CL_TRUE, 0, usable_feat * 8 * sizeof(unsigned), h_desc_lvl.data());
             }
 
-            auto eoOp = make_kernel<Buffer, const unsigned,
+            auto eoOp = KernelFunctor<Buffer, const unsigned,
                                     Buffer, Buffer, Buffer, Buffer,
                                     Buffer, KParam,
                                     const float, const unsigned> (*eoKernel[device]);
@@ -481,7 +502,6 @@ void orb(unsigned* out_feat,
             getQueue().enqueueCopyBuffer(*d_score_pyr[i], *score_out.data, 0, offset*sizeof(float), feat_pyr[i] * sizeof(float));
             getQueue().enqueueCopyBuffer(*d_ori_pyr[i], *ori_out.data, 0, offset*sizeof(float), feat_pyr[i] * sizeof(float));
             getQueue().enqueueCopyBuffer(*d_size_pyr[i], *size_out.data, 0, offset*sizeof(float), feat_pyr[i] * sizeof(float));
-
             getQueue().enqueueCopyBuffer(*d_desc_pyr[i], *desc_out.data, 0, offset*8*sizeof(unsigned), feat_pyr[i] * 8 * sizeof(unsigned));
 
             bufferFree(d_x_pyr[i]);
@@ -503,3 +523,19 @@ void orb(unsigned* out_feat,
 } //namespace kernel
 
 } //namespace opencl
+
+#if defined(__clang__)
+    /* Clang/LLVM */
+    #pragma clang diagnostic pop
+#elif defined(__ICC) || defined(__INTEL_COMPILER)
+    /* Intel ICC/ICPC */
+    // Fix the warning code here, if any
+#elif defined(__GNUC__) || defined(__GNUG__)
+    /* GNU GCC/G++ */
+    #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+    /* Microsoft Visual Studio */
+    #pragma warning( pop )
+#else
+    /* Other */
+#endif

@@ -38,6 +38,8 @@ void scan_dim_kernel(__global To *oData, KParam oInfo,
     ids[dim] = ids[dim] * DIMY * lim + lidy;
     oData  += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] + ids[1] * oInfo.strides[1] + ids[0];
     iData  += ids[3] *  iInfo.strides[3] + ids[2] *  iInfo.strides[2] + ids[1] *  iInfo.strides[1] + ids[0];
+    iData  += iInfo.offset;
+
     int id_dim = ids[dim];
     const int out_dim = oInfo.dims[dim];
 
@@ -69,7 +71,6 @@ void scan_dim_kernel(__global To *oData, KParam oInfo,
         l_val[lid] = val;
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        int start = 0;
         for (int off = 1; off < DIMY; off *= 2) {
 
             if (lidy >= off) val = binOp(val, l_val[lid - off * THREADS_X]);
@@ -82,12 +83,24 @@ void scan_dim_kernel(__global To *oData, KParam oInfo,
         }
 
         val = binOp(val, l_tmp[lidx]);
-        if (cond) *oData = val;
-        barrier(CLK_LOCAL_MEM_FENCE);
+
+        if (inclusive_scan != 0) {
+            if (cond) {
+                *oData = val;
+            }
+        }
+        else if (is_valid) {
+            if (id_dim == (out_dim - 1)) {
+                *(oData - (id_dim*ostride_dim)) = init_val;
+            } else if (id_dim < (out_dim - 1)) {
+                *(oData + ostride_dim) = val;
+            }
+        }
 
         id_dim += DIMY;
         iData += DIMY * istride_dim;
         oData += DIMY * ostride_dim;
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 
     if (!isFinalPass &&

@@ -15,7 +15,6 @@
 #endif
 #endif
 
-#include <af/array.h>
 #include <af/dim4.hpp>
 #include <ArrayInfo.hpp>
 #include "traits.hpp"
@@ -39,6 +38,12 @@ namespace cuda
 
     template<typename T>
     void evalNodes(Param<T> &out, JIT::Node *node);
+
+    template<typename T>
+    void evalNodes(std::vector<Param<T> > &out, std::vector<JIT::Node *> nodes);
+
+    template<typename T>
+    void evalMultiple(std::vector<Array<T> *> arrays);
 
     // Creates a new Array object on the heap and returns a reference to it.
     template<typename T>
@@ -78,9 +83,6 @@ namespace cuda
                             const std::vector<af_seq> &index,
                             bool copy=true);
 
-    template<typename T>
-    void evalArray(const Array<T> &A);
-
     // Creates a new Array object on the heap and returns a reference to it.
     template<typename T>
     void destroyArray(Array<T> *A);
@@ -88,8 +90,15 @@ namespace cuda
     template<typename T>
     void *getDevicePtr(const Array<T>& arr)
     {
-        memPop((T *)arr.get());
-        return (void *)arr.get();
+        T *ptr = arr.device();
+        memLock(ptr);
+        return (void *)ptr;
+    }
+
+    template<typename T>
+    void *getRawPtr(const Array<T>& arr)
+    {
+        return (void *)(arr.get(false));
     }
 
     template<typename T>
@@ -100,16 +109,19 @@ namespace cuda
         af::dim4 data_dims;
 
         JIT::Node_ptr node;
-        dim_t offset;
         bool ready;
         bool owner;
 
         Array(af::dim4 dims);
-        explicit Array(af::dim4 dims, const T * const in_data, bool is_device = false);
-        Array(const Array<T>& parnt, const dim4 &dims, const dim4 &offset, const dim4 &stride);
+
+        explicit Array(af::dim4 dims, const T * const in_data, bool is_device = false, bool copy_device = false);
+        Array(const Array<T>& parnt, const dim4 &dims, const dim_t &offset, const dim4 &stride);
         Array(Param<T> &tmp);
         Array(af::dim4 dims, JIT::Node_ptr n);
     public:
+
+        Array(af::dim4 dims, af::dim4 strides, dim_t offset,
+              const T * const in_data, bool is_device = false);
 
         void resetInfo(const af::dim4& dims)        { info.resetInfo(dims);         }
         void resetDims(const af::dim4& dims)        { info.resetDims(dims);         }
@@ -121,7 +133,6 @@ namespace cuda
     RET_TYPE NAME() const { return info.NAME(); }
 
         INFO_FUNC(const af_dtype& ,getType)
-        INFO_FUNC(const af::dim4& ,offsets)
         INFO_FUNC(const af::dim4& ,strides)
         INFO_FUNC(size_t          ,elements)
         INFO_FUNC(size_t          ,ndims)
@@ -147,6 +158,7 @@ namespace cuda
         INFO_IS_FUNC(isInteger);
         INFO_IS_FUNC(isBool);
         INFO_IS_FUNC(isLinear);
+        INFO_IS_FUNC(isSparse);
 
 #undef INFO_IS_FUNC
 
@@ -158,14 +170,30 @@ namespace cuda
         void eval();
         void eval() const;
 
-        dim_t getOffset() const { return offset; }
+        dim_t getOffset() const { return info.getOffset(); }
         shared_ptr<T> getData() const { return data; }
 
         dim4 getDataDims() const
         {
-            // This is for moddims
-            // dims and data_dims are different when moddims is used
-            return isOwner() ? dims() : data_dims;
+            return data_dims;
+        }
+
+        void setDataDims(const dim4 &new_dims)
+        {
+            modDims(new_dims);
+            data_dims = new_dims;
+        }
+
+        size_t getAllocatedBytes() const
+        {
+            return data_dims.elements() * sizeof(T);
+        }
+
+        T* device();
+
+        T* device() const
+        {
+            return const_cast<Array<T>*>(this)->device();
         }
 
         T* get(bool withOffset = true)
@@ -178,7 +206,7 @@ namespace cuda
         const   T* get(bool withOffset = true) const
         {
             if (!isReady()) eval();
-            return data.get() + (withOffset ? offset : 0);
+            return data.get() + (withOffset ? getOffset() : 0);
         }
 
         int useCount() const
@@ -204,8 +232,10 @@ namespace cuda
             return out;
         }
 
+        JIT::Node_ptr getNode();
         JIT::Node_ptr getNode() const;
 
+        friend void evalMultiple<T>(std::vector<Array<T> *> arrays);
         friend Array<T> createValueArray<T>(const af::dim4 &size, const T& value);
         friend Array<T> createHostDataArray<T>(const af::dim4 &size, const T * const data);
         friend Array<T> createDeviceDataArray<T>(const af::dim4 &size, const void *data);
@@ -220,8 +250,8 @@ namespace cuda
                                           bool copy);
 
         friend void destroyArray<T>(Array<T> *arr);
-        friend void evalArray<T>(const Array<T> &arr);
         friend void *getDevicePtr<T>(const Array<T>& arr);
+        friend void *getRawPtr<T>(const Array<T>& arr);
     };
 
 }

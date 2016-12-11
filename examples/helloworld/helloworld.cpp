@@ -43,6 +43,15 @@ int main(int argc, char *argv[])
         array c = C.row(end);
         af_print(c);
 
+        printf("Scan Test\n");
+        dim4 dims(16, 4, 1, 1);
+        array r = constant(2, dims);
+        af_print(r);
+
+        printf("Scan\n");
+        array S = af::scan(r, 0, AF_BINARY_MUL);
+        af_print(S);
+
         printf("Create 2-by-3 matrix from host data\n");
         float d[] = { 1, 2, 3, 4, 5, 6 };
         array D(2, 3, d, afHost);
@@ -60,16 +69,10 @@ int main(int argc, char *argv[])
         af_print(inds);
 
     } catch (af::exception& e) {
+
         fprintf(stderr, "%s\n", e.what());
         throw;
     }
 
-    #ifdef WIN32 // pause in Windows
-    if (!(argc == 2 && argv[1][0] == '-')) {
-        printf("hit [enter]...");
-        fflush(stdout);
-        getchar();
-    }
-    #endif
     return 0;
 }

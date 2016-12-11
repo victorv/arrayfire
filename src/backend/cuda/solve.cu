@@ -27,7 +27,6 @@
 #include <lu.hpp>
 #include <qr.hpp>
 
-#include <handle.hpp>
 #include <cstdio>
 
 namespace cuda
@@ -382,6 +381,37 @@ INSTANTIATE_SOLVE(cfloat)
 INSTANTIATE_SOLVE(double)
 INSTANTIATE_SOLVE(cdouble)
 
+}
+
+#elif defined(WITH_CPU_LINEAR_ALGEBRA)
+#include<cpu_lapack/cpu_solve.hpp>
+
+namespace cuda
+{
+
+template<typename T>
+Array<T> solveLU(const Array<T> &A, const Array<int> &pivot,
+                 const Array<T> &b, const af_mat_prop options)
+{
+    return cpu::solveLU(A, pivot, b, options);
+}
+
+template<typename T>
+Array<T> solve(const Array<T> &a, const Array<T> &b, const af_mat_prop options)
+{
+    return cpu::solve(a, b, options);
+}
+
+#define INSTANTIATE_SOLVE(T)                                            \
+    template Array<T> solve<T>(const Array<T> &a, const Array<T> &b,    \
+                               const af_mat_prop options);              \
+    template Array<T> solveLU<T>(const Array<T> &A, const Array<int> &pivot, \
+                                 const Array<T> &b, const af_mat_prop options); \
+
+INSTANTIATE_SOLVE(float)
+INSTANTIATE_SOLVE(cfloat)
+INSTANTIATE_SOLVE(double)
+INSTANTIATE_SOLVE(cdouble)
 }
 
 #else

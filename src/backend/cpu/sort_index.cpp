@@ -10,99 +10,69 @@
 #include <Array.hpp>
 #include <sort_index.hpp>
 #include <math.hpp>
-#include <stdexcept>
-#include <err_cpu.hpp>
 #include <algorithm>
 #include <numeric>
-#include <queue>
-#include <future>
-
-using std::greater;
-using std::less;
-using std::sort;
-using std::function;
-using std::queue;
-using std::future;
-using std::async;
+#include <platform.hpp>
+#include <queue.hpp>
+#include <range.hpp>
+#include <copy.hpp>
+#include <reorder.hpp>
+#include <kernel/sort_by_key.hpp>
 
 namespace cpu
 {
-    ///////////////////////////////////////////////////////////////////////////
-    // Kernel Functions
-    ///////////////////////////////////////////////////////////////////////////
-    template<typename T, bool isAscending>
-    void sort0_index(Array<T> &val, Array<uint> &idx, const Array<T> &in)
-    {
-        // initialize original index locations
-           uint *idx_ptr = idx.get();
-              T *val_ptr = val.get();
-        const T *in_ptr  = in.get();
-        function<bool(T, T)> op = greater<T>();
-        if(isAscending) { op = less<T>(); }
 
-        std::vector<uint> seq_vec(idx.dims()[0]);
-        std::iota(seq_vec.begin(), seq_vec.end(), 0);
+template<typename T>
+void sort_index(Array<T> &okey, Array<uint> &oval, const Array<T> &in, const uint dim, bool isAscending)
+{
+    in.eval();
 
-        const T *comp_ptr = nullptr;
-        auto comparator = [&comp_ptr, &op](size_t i1, size_t i2) {return op(comp_ptr[i1], comp_ptr[i2]);};
+    // okey is values, oval is indices
+    okey = copyArray<T>(in);
+    oval = range<uint>(in.dims(), dim);
+    oval.eval();
 
-        for(dim_t w = 0; w < in.dims()[3]; w++) {
-            dim_t valW = w * val.strides()[3];
-            dim_t idxW = w * idx.strides()[3];
-            dim_t  inW = w *  in.strides()[3];
-            for(dim_t z = 0; z < in.dims()[2]; z++) {
-                dim_t valWZ = valW + z * val.strides()[2];
-                dim_t idxWZ = idxW + z * idx.strides()[2];
-                dim_t  inWZ =  inW + z *  in.strides()[2];
-                for(dim_t y = 0; y < in.dims()[1]; y++) {
-
-                    dim_t valOffset = valWZ + y * val.strides()[1];
-                    dim_t idxOffset = idxWZ + y * idx.strides()[1];
-                    dim_t inOffset  =  inWZ + y *  in.strides()[1];
-
-                    uint *ptr = idx_ptr + idxOffset;
-                    std::copy(seq_vec.begin(), seq_vec.end(), ptr);
-
-                    comp_ptr = in_ptr + inOffset;
-                    std::stable_sort(ptr, ptr + in.dims()[0], comparator);
-
-                    for (dim_t i = 0; i < val.dims()[0]; ++i){
-                        val_ptr[valOffset + i] = in_ptr[inOffset + idx_ptr[idxOffset + i]];
-                    }
-                }
-            }
-        }
-
-        return;
+    switch(dim) {
+        case 0: getQueue().enqueue(kernel::sort0ByKey<T, uint>, okey, oval, isAscending); break;
+        case 1:
+        case 2:
+        case 3: getQueue().enqueue(kernel::sortByKeyBatched<T, uint>, okey, oval, dim, isAscending); break;
+        default: AF_ERROR("Not Supported", AF_ERR_NOT_SUPPORTED);
     }
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Wrapper Functions
-    ///////////////////////////////////////////////////////////////////////////
-    template<typename T, bool isAscending>
-    void sort_index(Array<T> &val, Array<uint> &idx, const Array<T> &in, const uint dim)
-    {
-        val = createEmptyArray<T>(in.dims());
-        idx = createEmptyArray<uint>(in.dims());
-        switch(dim) {
-            case 0: sort0_index<T, isAscending>(val, idx, in);
-                    break;
-            default: AF_ERROR("Not Supported", AF_ERR_NOT_SUPPORTED);
+    if(dim != 0) {
+        af::dim4 preorderDims = okey.dims();
+        af::dim4 reorderDims(0, 1, 2, 3);
+        reorderDims[dim] = 0;
+        preorderDims[0] = okey.dims()[dim];
+        for(int i = 1; i <= (int)dim; i++) {
+            reorderDims[i - 1] = i;
+            preorderDims[i] = okey.dims()[i - 1];
         }
+
+        okey.setDataDims(preorderDims);
+        oval.setDataDims(preorderDims);
+
+        okey = reorder<T>(okey, reorderDims);
+        oval = reorder<uint>(oval, reorderDims);
     }
+}
 
 #define INSTANTIATE(T)                                                  \
-    template void sort_index<T, true>(Array<T> &val, Array<uint> &idx, const Array<T> &in, \
-                                      const uint dim);                  \
-    template void sort_index<T,false>(Array<T> &val, Array<uint> &idx, const Array<T> &in, \
-                                      const uint dim);                  \
+    template void sort_index<T>(Array<T> &val, Array<uint> &idx, const Array<T> &in, \
+                                      const uint dim, bool isAscending);
 
-    INSTANTIATE(float)
-    INSTANTIATE(double)
-    //INSTANTIATE(cfloat)
-    //INSTANTIATE(cdouble)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(char)
-    INSTANTIATE(uchar)
+INSTANTIATE(float)
+INSTANTIATE(double)
+//INSTANTIATE(cfloat)
+//INSTANTIATE(cdouble)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(char)
+INSTANTIATE(uchar)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+
 }

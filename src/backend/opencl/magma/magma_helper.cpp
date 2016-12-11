@@ -43,6 +43,12 @@ template<typename T> T magma_scalar(double val) { return (T)val; }
 template float magma_scalar<float>(double val);
 template double magma_scalar<double>(double val);
 
+template<typename T> double  magma_real(T val) { return (double)val; }
+template double magma_real<float>(float val);
+template double magma_real<double>(double val);
+template<> double magma_real<magmaFloatComplex>(magmaFloatComplex val) { return (double)val.s[0]; }
+template<> double magma_real<magmaDoubleComplex>(magmaDoubleComplex val) { return (double)val.s[0]; }
+
 #define INSTANTIATE_CPLX_SCALAR(T)              \
     template<> T magma_scalar<T>(double val)    \
     {                                           \
@@ -152,3 +158,32 @@ magma_int_t magma_get_geqrf_nb<magmaDoubleComplex>( magma_int_t m )
     else if (m <= 4032) return 64;
     else                return 128;
 }
+
+#if defined(__GNUC__) || defined(__GNUG__)
+    /* GCC/G++, Clang/LLVM, Intel ICC */
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wmissing-braces"
+#else
+    /* Other */
+#endif
+
+template<typename T> T magma_make(double r, double i) { return (T) r; }
+template float magma_make<float>(double r, double i);
+template double magma_make<double>(double r, double i);
+template<> magmaFloatComplex magma_make<magmaFloatComplex>(double r, double i)
+{
+    magmaFloatComplex tmp = {(float)r, (float)i};
+    return tmp;
+}
+template<> magmaDoubleComplex magma_make<magmaDoubleComplex>(double r, double i)
+{
+    magmaDoubleComplex tmp = {r, i};
+    return tmp;
+}
+
+#if defined(__GNUC__) || defined(__GNUG__)
+    /* GCC/G++, Clang/LLVM, Intel ICC */
+    #pragma GCC diagnostic pop
+#else
+    /* Other */
+#endif

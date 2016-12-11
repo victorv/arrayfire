@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <dispatch.hpp>
 #include <err_cuda.hpp>
 #include <math.hpp>
@@ -15,6 +14,7 @@
 #include <stdio.h>
 #include <memory.hpp>
 
+#include <thrust/system/cuda/detail/par.h>
 #include <thrust/adjacent_difference.h>
 #include <thrust/binary_search.h>
 #include <thrust/device_vector.h>
@@ -101,16 +101,11 @@ static void final_relabel(cuda::Param<T> equiv_map, cuda::CParam<char> bin, cons
 // do not choose zero, which indicates invalid.
 template<typename T>
 __device__ __inline__
-static T relabel(const T a, const T b) {
-    return min((a + (cuda::limit_max<T>() * (a == 0))),(b + (cuda::limit_max<T>() * (b == 0))));
-}
-__device__ __inline__
-static double relabel(const double a, const double b) {
-    return fmin((a + (cuda::limit_max<double>() * (a == 0))),(b + (cuda::limit_max<double>() * (b == 0))));
-}
-__device__ __inline__
-static float relabel(const float a, const float b) {
-    return fminf((a + (cuda::limit_max<float>() * (a == 0))),(b + (cuda::limit_max<float>() * (b == 0))));
+static T relabel(const T a, const T b)
+{
+    T aa = (a == 0) ? cuda::maxval<T>() : a;
+    T bb = (b == 0) ? cuda::maxval<T>() : b;
+    return min(aa, bb);
 }
 
 //Calculates the number of warps at compile time
@@ -410,7 +405,7 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
 
     const dim3 blocks(blk_x, blk_y);
 
-    (initial_label<T,n_per_thread>)<<<blocks, threads>>>(out, in);
+    CUDA_LAUNCH((initial_label<T,n_per_thread>), blocks, threads, out, in);
 
     POST_LAUNCH_CHECK();
 
@@ -418,16 +413,18 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
 
     while (h_continue) {
         h_continue = 0;
-        CUDA_CHECK(cudaMemcpyToSymbol(continue_flag, &h_continue, sizeof(int),
-                                      0, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpyToSymbolAsync(continue_flag, &h_continue, sizeof(int),
+                    0, cudaMemcpyHostToDevice,
+                    cuda::getStream(cuda::getActiveDeviceId())));
 
-        (update_equiv<T, 16, n_per_thread, full_conn>)<<<blocks, threads>>>
-            (out, tex);
+        CUDA_LAUNCH((update_equiv<T, 16, n_per_thread, full_conn>), blocks, threads, out, tex);
 
         POST_LAUNCH_CHECK();
 
-        CUDA_CHECK(cudaMemcpyFromSymbol(&h_continue, continue_flag, sizeof(int),
-                                        0, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpyFromSymbolAsync(&h_continue, continue_flag, sizeof(int),
+                    0, cudaMemcpyDeviceToHost,
+                    cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
     }
 
     // Now, perform the final relabeling.  This converts the equivalency
@@ -436,14 +433,15 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
     // 1.
     int size = in.dims[0] * in.dims[1];
     T* tmp = cuda::memAlloc<T>(size);
-    CUDA_CHECK(cudaMemcpy(tmp, out.ptr, size * sizeof(T),
-                          cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(tmp, out.ptr, size * sizeof(T),
+                          cudaMemcpyDeviceToDevice,
+                          cuda::getStream(cuda::getActiveDeviceId())));
 
     // Wrap raw device ptr
     thrust::device_ptr<T> wrapped_tmp = thrust::device_pointer_cast(tmp);
 
     // Sort the copy
-    thrust::sort(wrapped_tmp, wrapped_tmp + size);
+    THRUST_SELECT(thrust::sort, wrapped_tmp, wrapped_tmp + size);
 
     // Take the max element, this is the number of label assignments to
     // compute.
@@ -453,10 +451,10 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
 
     // Find the end of each section of values
     thrust::counting_iterator<T> search_begin(0);
-    thrust::upper_bound(wrapped_tmp,  wrapped_tmp  + size,
+    THRUST_SELECT(thrust::upper_bound, wrapped_tmp,  wrapped_tmp  + size,
                         search_begin, search_begin + num_bins,
                         labels.begin());
-    thrust::adjacent_difference(labels.begin(), labels.end(), labels.begin());
+    THRUST_SELECT(thrust::adjacent_difference, labels.begin(), labels.end(), labels.begin());
 
     // Operators for the scan
     clamp_to_one<T> clamp;
@@ -464,7 +462,8 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
 
     // Perform the scan -- this can computes the correct labels for each
     // component
-    thrust::transform_exclusive_scan(labels.begin(),
+    THRUST_SELECT(thrust::transform_exclusive_scan,
+                                     labels.begin(),
                                      labels.end(),
                                      labels.begin(),
                                      clamp,
@@ -472,9 +471,8 @@ void regions(cuda::Param<T> out, cuda::CParam<char> in, cudaTextureObject_t tex)
                                      add);
 
     // Apply the correct labels to the equivalency map
-    (final_relabel<T,n_per_thread>)<<<blocks,threads>>>(out,
-                                                        in,
-                                                        thrust::raw_pointer_cast(&labels[0]));
+    CUDA_LAUNCH((final_relabel<T,n_per_thread>), blocks,threads,
+            out, in, thrust::raw_pointer_cast(&labels[0]));
 
     POST_LAUNCH_CHECK();
 

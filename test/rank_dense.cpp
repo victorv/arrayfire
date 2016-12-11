@@ -22,6 +22,7 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -30,13 +31,20 @@ class Rank : public ::testing::Test
 {
 };
 
+template<typename T>
+class Det : public ::testing::Test
+{
+};
+
 typedef ::testing::Types<float, double, af::cfloat, af::cdouble> TestTypes;
 TYPED_TEST_CASE(Rank, TestTypes);
+TYPED_TEST_CASE(Det, TestTypes);
 
 template<typename T>
 void rankSmall()
 {
     if (noDoubleTests<T>()) return;
+    if (noLAPACKTests()) return;
 
     T ha[] = {1, 4, 7, 2, 5, 8, 3, 6, 20};
     af::array a(3, 3, ha);
@@ -48,6 +56,8 @@ template<typename T>
 void rankBig(const int num)
 {
     if (noDoubleTests<T>()) return;
+    if (noLAPACKTests()) return;
+
     af::dtype dt = (af::dtype)af::dtype_traits<T>::af_type;
     af::array a = af::randu(num, num, dt);
     ASSERT_EQ(num, (int)af::rank(a));
@@ -61,6 +71,8 @@ template<typename T>
 void rankLow(const int num)
 {
     if (noDoubleTests<T>()) return;
+    if (noLAPACKTests()) return;
+
     af::dtype dt = (af::dtype)af::dtype_traits<T>::af_type;
 
     af::array a = af::randu(3 * num, num, dt);
@@ -85,4 +97,30 @@ TYPED_TEST(Rank, big)
 TYPED_TEST(Rank, low)
 {
     rankBig<TypeParam>(512);
+}
+
+template<typename T>
+void detTest()
+{
+    if (noDoubleTests<T>()) return;
+    if (noLAPACKTests()) return;
+
+    af::dtype dt = (af::dtype)af::dtype_traits<T>::af_type;
+
+    vector<af::dim4> numDims;
+
+    vector<vector<float> >   in;
+    vector<vector<float> >   tests;
+    readTests<float,float,float>(string(TEST_DIR"/lapack/detSmall.test"),numDims,in,tests);
+    af::dim4 dims       = numDims[0];
+
+    af::array input = af::array(dims, &(in[0].front())).as(dt);
+    T output = af::det<T>(input);
+
+    ASSERT_NEAR(abs((T)tests[0][0]), abs(output), 1e-6);
+}
+
+TYPED_TEST(Det, Small)
+{
+    detTest<TypeParam>();
 }

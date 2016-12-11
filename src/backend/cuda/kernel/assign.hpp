@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -77,7 +76,7 @@ void assign(Param<T> out, CParam<T> in, const AssignKernelParam_t& p)
 
     dim3 blocks(blks_x*in.dims[2], blks_y*in.dims[3]);
 
-    AssignKernel<T> <<<blocks, threads>>> (out, in, p, blks_x, blks_y);
+    CUDA_LAUNCH((AssignKernel<T>), blocks, threads, out, in, p, blks_x, blks_y);
 
     POST_LAUNCH_CHECK();
 }

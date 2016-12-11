@@ -9,8 +9,6 @@
 
 #include <complex>
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <ireduce.hpp>
 #include <ops.hpp>
@@ -51,6 +49,8 @@ namespace opencl
     INSTANTIATE(af_min_t, uintl  )
     INSTANTIATE(af_min_t, char   )
     INSTANTIATE(af_min_t, uchar  )
+    INSTANTIATE(af_min_t, short  )
+    INSTANTIATE(af_min_t, ushort )
 
     //max
     INSTANTIATE(af_max_t, float  )
@@ -63,4 +63,6 @@ namespace opencl
     INSTANTIATE(af_max_t, uintl  )
     INSTANTIATE(af_max_t, char   )
     INSTANTIATE(af_max_t, uchar  )
+    INSTANTIATE(af_max_t, short  )
+    INSTANTIATE(af_max_t, ushort )
 }

@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <err_cuda.hpp>
@@ -131,7 +130,7 @@ __global__ void padArray(
     }
 }
 
-template<typename convT, ConvolveBatchKind kind>
+template<typename convT, AF_BATCH_KIND kind>
 __global__ void complexMultiply(
     Param<convT> out,
     Param<convT> in1,
@@ -143,7 +142,7 @@ __global__ void complexMultiply(
     if (t >= nelem)
         return;
 
-    if (kind == CONVOLVE_BATCH_NONE || kind == CONVOLVE_BATCH_SAME) {
+    if (kind == AF_BATCH_NONE || kind == AF_BATCH_SAME) {
         // Complex multiply each signal to equivalent filter
         const int ridx = t;
 
@@ -153,7 +152,7 @@ __global__ void complexMultiply(
         out.ptr[ridx].x = c1.x*c2.x - c1.y*c2.y;
         out.ptr[ridx].y = (c1.x+c1.y) * (c2.x+c2.y) - c1.x*c2.x - c1.y*c2.y;
     }
-    else if (kind == CONVOLVE_BATCH_SIGNAL) {
+    else if (kind == AF_BATCH_LHS) {
         // Complex multiply all signals to filter
         const int ridx1 = t;
         const int ridx2 = t % (in2.strides[3] * in2.dims[3]);
@@ -164,7 +163,7 @@ __global__ void complexMultiply(
         out.ptr[ridx1].x = c1.x*c2.x - c1.y*c2.y;
         out.ptr[ridx1].y = (c1.x+c1.y) * (c2.x+c2.y) - c1.x*c2.x - c1.y*c2.y;
     }
-    else if (kind == CONVOLVE_BATCH_KERNEL) {
+    else if (kind == AF_BATCH_RHS) {
         // Complex multiply signal to all filters
         const int ridx1 = t % (in1.strides[3] * in1.dims[3]);
         const int ridx2 = t;
@@ -262,8 +261,13 @@ void packDataHelper(Param<convT> sig_packed,
 {
     dim_t *sd = sig.dims;
 
-    int sig_packed_elem = sig_packed.strides[3] * sig_packed.dims[3];
-    int filter_packed_elem = filter_packed.strides[3] * filter_packed.dims[3];
+    int sig_packed_elem = 1;
+    int filter_packed_elem = 1;
+
+    for (int i = 0; i < 4; i++) {
+        sig_packed_elem *= sig_packed.dims[i];
+        filter_packed_elem *= filter_packed.dims[i];
+    }
 
     // Number of packed complex elements in dimension 0
     int sig_half_d0 = divup(sd[0], 2);
@@ -274,13 +278,13 @@ void packDataHelper(Param<convT> sig_packed,
 
     // Pack signal in a complex matrix where first dimension is half the input
     // (allows faster FFT computation) and pad array to a power of 2 with 0s
-    packData<convT, T><<<blocks, threads>>>(sig_packed, sig, sig_half_d0, sig_half_d0_odd);
+    CUDA_LAUNCH((packData<convT, T>), blocks, threads, sig_packed, sig, sig_half_d0, sig_half_d0_odd);
     POST_LAUNCH_CHECK();
 
     blocks = dim3(divup(filter_packed_elem, threads.x));
 
     // Pad filter array with 0s
-    padArray<convT, T><<<blocks, threads>>>(filter_packed, filter);
+    CUDA_LAUNCH((padArray<convT, T>), blocks, threads, filter_packed, filter);
     POST_LAUNCH_CHECK();
 }
 
@@ -290,10 +294,15 @@ void complexMultiplyHelper(Param<T> out,
                            Param<convT> filter_packed,
                            CParam<T> sig,
                            CParam<T> filter,
-                           ConvolveBatchKind kind)
+                           AF_BATCH_KIND kind)
 {
-    int sig_packed_elem = sig_packed.strides[3] * sig_packed.dims[3];
-    int filter_packed_elem = filter_packed.strides[3] * filter_packed.dims[3];
+    int sig_packed_elem = 1;
+    int filter_packed_elem = 1;
+
+    for (int i = 0; i < 4; i++) {
+        sig_packed_elem *= sig_packed.dims[i];
+        filter_packed_elem *= filter_packed.dims[i];
+    }
 
     dim3 threads(THREADS);
     dim3 blocks(divup(sig_packed_elem / 2, threads.x));
@@ -304,23 +313,23 @@ void complexMultiplyHelper(Param<T> out,
 
     // Multiply filter and signal FFT arrays
     switch(kind) {
-        case CONVOLVE_BATCH_NONE:
-            complexMultiply<convT, CONVOLVE_BATCH_NONE  ><<<blocks, threads>>>
-                (sig_packed, sig_packed, filter_packed, mul_elem);
+        case AF_BATCH_NONE:
+            CUDA_LAUNCH((complexMultiply<convT, AF_BATCH_NONE>), blocks, threads,
+                    sig_packed, sig_packed, filter_packed, mul_elem);
             break;
-        case CONVOLVE_BATCH_SIGNAL:
-            complexMultiply<convT, CONVOLVE_BATCH_SIGNAL ><<<blocks, threads>>>
-                (sig_packed, sig_packed, filter_packed, mul_elem);
+        case AF_BATCH_LHS:
+            CUDA_LAUNCH((complexMultiply<convT, AF_BATCH_LHS>), blocks, threads,
+                        sig_packed, sig_packed, filter_packed, mul_elem);
             break;
-        case CONVOLVE_BATCH_KERNEL:
-            complexMultiply<convT, CONVOLVE_BATCH_KERNEL ><<<blocks, threads>>>
-                (filter_packed, sig_packed, filter_packed, mul_elem);
+        case AF_BATCH_RHS:
+            CUDA_LAUNCH((complexMultiply<convT, AF_BATCH_RHS>), blocks, threads,
+                    filter_packed, sig_packed, filter_packed, mul_elem);
             break;
-        case CONVOLVE_BATCH_SAME:
-            complexMultiply<convT, CONVOLVE_BATCH_SAME><<<blocks, threads>>>
-                (sig_packed, sig_packed, filter_packed, mul_elem);
+        case AF_BATCH_SAME:
+            CUDA_LAUNCH((complexMultiply<convT, AF_BATCH_SAME>), blocks, threads,
+                    sig_packed, sig_packed, filter_packed, mul_elem);
             break;
-        case CONVOLVE_BATCH_UNSUPPORTED:
+        case AF_BATCH_UNSUPPORTED:
         default:
             break;
     }
@@ -332,7 +341,7 @@ void reorderOutputHelper(Param<T> out,
                          Param<convT> packed,
                          CParam<T> sig,
                          CParam<T> filter,
-                         ConvolveBatchKind kind)
+                         AF_BATCH_KIND kind)
 {
     dim_t *sd = sig.dims;
     int fftScale = 1;
@@ -347,8 +356,8 @@ void reorderOutputHelper(Param<T> out,
     dim3 threads(THREADS);
     dim3 blocks(divup(out.strides[3] * out.dims[3], threads.x));
 
-    reorderOutput<T, convT, expand, roundOut><<<blocks, threads>>>
-        (out, packed, filter, sig_half_d0, baseDim, fftScale);
+    CUDA_LAUNCH((reorderOutput<T, convT, expand, roundOut>), blocks, threads,
+            out, packed, filter, sig_half_d0, baseDim, fftScale);
     POST_LAUNCH_CHECK();
 }
 

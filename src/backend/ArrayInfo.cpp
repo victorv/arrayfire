@@ -13,36 +13,10 @@
 #include <functional>
 #include <err_common.hpp>
 
+#include <backend.hpp>
+#include <platform.hpp>
+
 using af::dim4;
-
-dim_t
-calcOffset(const af::dim4 &strides, const af::dim4 &offsets)
-{
-    dim_t offset = 0;
-    for (int i = 0; i < 4; i++) offset += offsets[i] * strides[i];
-    return offset;
-}
-
-
-const ArrayInfo&
-getInfo(af_array arr)
-{
-    const ArrayInfo *info = static_cast<ArrayInfo*>(reinterpret_cast<void *>(arr));
-    return *info;
-}
-
-af_err
-af_get_elements(dim_t *elems, const af_array arr)
-{
-    *elems =  getInfo(arr).elements();
-    return AF_SUCCESS; //FIXME: Catch exceptions correctly
-}
-
-af_err af_get_type(af_dtype *type, const af_array arr)
-{
-    *type = getInfo(arr).getType();
-    return AF_SUCCESS; //FIXME: Catch exceptions correctly
-}
 
 dim4 calcStrides(const dim4 &parentDim)
 {
@@ -55,6 +29,40 @@ dim4 calcStrides(const dim4 &parentDim)
     }
 
     return out;
+}
+
+int ArrayInfo::getDevId() const
+{
+    // The actual device ID is only stored in the first 8 bits of devId
+    // See ArrayInfo.hpp for more
+    return devId & 0xff;
+}
+
+void ArrayInfo::setId(int id) const
+{
+    // 1 << (backendId + 8) sets the 9th, 10th or 11th bit of devId to 1
+    // for CPU, CUDA and OpenCL respectively
+    // See ArrayInfo.hpp for more
+    int backendId = detail::getBackend() >> 1; // Convert enums 1, 2, 4 to ints 0, 1, 2
+    const_cast<ArrayInfo *>(this)->setId(id | 1 << (backendId + 8));
+}
+
+void ArrayInfo::setId(int id)
+{
+    // 1 << (backendId + 8) sets the 9th, 10th or 11th bit of devId to 1
+    // for CPU, CUDA and OpenCL respectively
+    // See ArrayInfo.hpp for more
+    int backendId = detail::getBackend() >> 1; // Convert enums 1, 2, 4 to ints 0, 1, 2
+    devId = id | 1 << (backendId + 8);
+}
+
+af_backend ArrayInfo::getBackendId() const
+{
+    // devId >> 8 converts the backend info to 1, 2, 4 which are enums
+    // for CPU, CUDA and OpenCL respectively
+    // See ArrayInfo.hpp for more
+    int backendId = devId >> 8;
+    return (af_backend)backendId;
 }
 
 void ArrayInfo::modStrides(const dim4 &newStrides)
@@ -133,6 +141,8 @@ bool ArrayInfo::isInteger() const
          || type == u32
          || type == s64
          || type == u64
+         || type == s16
+         || type == u16
          || type == u8);
 }
 
@@ -157,6 +167,11 @@ bool ArrayInfo::isLinear() const
     return true;
 }
 
+bool ArrayInfo::isSparse() const
+{
+    return is_sparse;
+}
+
 dim4 getOutDims(const dim4 &ldims, const dim4 &rdims, bool batchMode)
 {
     if (!batchMode) {
@@ -171,4 +186,47 @@ dim4 getOutDims(const dim4 &ldims, const dim4 &rdims, bool batchMode)
     }
 
     return dim4(4, odims);
+}
+
+using std::vector;
+
+dim4
+toDims(const vector<af_seq>& seqs, const dim4 &parentDims)
+{
+    dim4 outDims(1, 1, 1, 1);
+    for(unsigned i = 0; i < seqs.size(); i++ ) {
+        outDims[i] = af::calcDim(seqs[i], parentDims[i]);
+        if (outDims[i] > parentDims[i])
+            AF_ERROR("Size mismatch between input and output", AF_ERR_SIZE);
+    }
+    return outDims;
+}
+
+dim4
+toOffset(const vector<af_seq>& seqs, const dim4 &parentDims)
+{
+    dim4 outOffsets(0, 0, 0, 0);
+    for(unsigned i = 0; i < seqs.size(); i++ ) {
+        if (seqs[i].step !=0 && seqs[i].begin >= 0) {
+            outOffsets[i] = seqs[i].begin;
+        } else if (seqs[i].begin <= -1) {
+            outOffsets[i] = parentDims[i] + seqs[i].begin;
+        } else {
+            outOffsets[i] = 0;
+        }
+
+        if (outOffsets[i] >= parentDims[i])
+            AF_ERROR("Index out of range", AF_ERR_SIZE);
+    }
+    return outOffsets;
+}
+
+dim4
+toStride(const vector<af_seq>& seqs, const af::dim4 &parentDims)
+{
+    dim4 out(calcStrides(parentDims));
+    for(unsigned i = 0; i < seqs.size(); i++ ) {
+        if  (seqs[i].step != 0) {   out[i] *= seqs[i].step; }
+    }
+    return out;
 }

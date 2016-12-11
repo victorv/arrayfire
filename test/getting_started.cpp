@@ -15,9 +15,18 @@
 
 using namespace af;
 using std::vector;
+using std::abs;
 
 TEST(GettingStarted, SNIPPET_getting_started_gen)
 {
+
+    //! [ex_getting_started_constructors]
+    // Arrays may be created using the af::array constructor and dimensioned
+    // as 1D, 2D, 3D; however, the values in these arrays will be undefined
+    array undefined_1D(100);        // 1D array with 100 elements
+    array undefined_2D(10, 100);    // 2D array of size 10 x 100
+    array undefined_3D(10, 10, 10); // 3D array of size 10 x 10 x 10
+    //! [ex_getting_started_constructors]
 
     //! [ex_getting_started_gen]
     // Generate an array of size three filled with zeros.
@@ -47,7 +56,7 @@ TEST(GettingStarted, SNIPPET_getting_started_gen)
         output.resize(zeros.elements());
         zeros.host(&output.front());
         ASSERT_EQ(f32, zeros.type());
-        for(unsigned i = 0; i < zeros.elements(); i++) ASSERT_FLOAT_EQ(0, output[i]);
+        for(dim_t i = 0; i < zeros.elements(); i++) ASSERT_FLOAT_EQ(0, output[i]);
     }
 
     if (!noDoubleTests<double>()) {
@@ -55,15 +64,15 @@ TEST(GettingStarted, SNIPPET_getting_started_gen)
         vector<double> output(ones.elements());
         ones.host(&output.front());
         ASSERT_EQ(f64, ones.type());
-        for(unsigned i = 0; i < ones.elements(); i++) ASSERT_FLOAT_EQ(1, output[i]);
+        for(dim_t i = 0; i < ones.elements(); i++) ASSERT_FLOAT_EQ(1, output[i]);
     }
 
     {
         vector<float> output;
         output.resize(iden.elements());
         iden.host(&output.front());
-        for(unsigned i = 0; i < iden.dims(0); i++)
-            for(unsigned j = 0; j < iden.dims(1); j++)
+        for(dim_t i = 0; i < iden.dims(0); i++)
+            for(dim_t j = 0; j < iden.dims(1); j++)
                 if(i == j)  ASSERT_FLOAT_EQ(1, output[i * iden.dims(0) + j]);
                 else        ASSERT_FLOAT_EQ(0, output[i * iden.dims(0) + j]);
     }

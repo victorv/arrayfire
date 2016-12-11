@@ -10,6 +10,7 @@
 #include <af/timing.h>
 #include <af/device.h>
 #include <math.h>
+#include <vector>
 #include <algorithm>
 
 using namespace af;
@@ -67,48 +68,59 @@ namespace af {
 
 static timer _timer_;
 
-AFAPI timer timer::start()
+timer timer::start()
 {
     return _timer_ = time_now();
 }
-AFAPI double timer::stop(timer start)
+double timer::stop(timer start)
 {
     return time_seconds(start, time_now());
 }
-AFAPI double timer::stop()
+double timer::stop()
 {
     return time_seconds(_timer_, time_now());
 }
 
-AFAPI double timeit(void(*fn)())
+double timeit(void(*fn)())
 {
     // parameters
-    int sample_trials = 3;
-    double min_time = 1;
+    static const int    trials   = 10;  // trial runs
+    static const int    s_trials = 5;   // trial runs
+    static const double min_time = 1;   // seconds
+
+    std::vector<double> sample_times(s_trials);
 
     // estimate time for a few samples
-    double sample_time = 1e99; // INF
-    for (int i = 0; i < sample_trials; ++i) {
+    for (int i = 0; i < s_trials; ++i) {
         sync();
         timer start = timer::start();
         fn();
         sync();
-        sample_time = std::min(sample_time, timer::stop(start));
+        sample_times[i] = timer::stop(start);
     }
 
-    double seconds = std::max(sample_time, min_time); // at least minimum time
-    double elapsed = 0;
-    while (elapsed + sample_time < seconds) {
-        int r = ceilf((seconds - elapsed) / sample_time);
+    // Sort sample times and select the median time
+    std::sort(sample_times.begin(), sample_times.end());
+
+    double median_time = sample_times[s_trials / 2];
+
+    // Run a bunch of batches of fn
+    // Each batch runs trial runs before sync
+    // If trials * median_time < min time,
+    //   then run (min time / (trials * median_time)) batches
+    // else
+    //   run 1 batch
+    int batches = (int)ceilf(min_time / (trials * median_time));
+    double run_time = 0;
+
+    for(int b = 0; b < batches; b++) {
         timer start = timer::start();
-        for (int i = 0; i < r; ++i)
+        for (int i = 0; i < trials; ++i)
             fn();
         sync();
-        double t = timer::stop(start);
-        elapsed += t;
-        sample_time = std::min(sample_time, t / r);
+        run_time += timer::stop(start) / trials;
     }
-    return sample_time;
+    return run_time / batches;
 }
 
 } // namespace af

@@ -1,6 +1,6 @@
 INCLUDE(ExternalProject)
 
-SET(prefix "${CMAKE_BINARY_DIR}/third_party/clFFT")
+SET(prefix "${PROJECT_BINARY_DIR}/third_party/clFFT")
 SET(clFFT_location ${prefix}/lib/import/${CMAKE_STATIC_LIBRARY_PREFIX}clFFT${CMAKE_STATIC_LIBRARY_SUFFIX})
 IF(CMAKE_VERSION VERSION_LESS 3.2)
     IF(CMAKE_GENERATOR MATCHES "Ninja")
@@ -12,9 +12,9 @@ ELSE()
 ENDIF()
 
 ExternalProject_Add(
-    clFFT-external
+    clFFT-ext
     GIT_REPOSITORY https://github.com/arrayfire/clFFT.git
-    GIT_TAG 1597f0f35a644789c7ad77efe79014236cca2fab
+    GIT_TAG arrayfire-release
     PREFIX "${prefix}"
     INSTALL_DIR "${prefix}"
     UPDATE_COMMAND ""
@@ -34,10 +34,10 @@ ExternalProject_Add(
     ${byproducts}
     )
 
-ExternalProject_Get_Property(clFFT-external install_dir)
+ExternalProject_Get_Property(clFFT-ext install_dir)
 ADD_LIBRARY(clFFT IMPORTED STATIC)
 SET_TARGET_PROPERTIES(clFFT PROPERTIES IMPORTED_LOCATION ${clFFT_location})
-ADD_DEPENDENCIES(clFFT clFFT-external)
+ADD_DEPENDENCIES(clFFT clFFT-ext)
 SET(CLFFT_INCLUDE_DIRS ${install_dir}/include)
 SET(CLFFT_LIBRARIES clFFT)
 SET(CLFFT_FOUND ON)

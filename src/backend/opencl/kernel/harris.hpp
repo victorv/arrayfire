@@ -13,10 +13,10 @@
 #include <dispatch.hpp>
 #include <err_opencl.hpp>
 #include <debug_opencl.hpp>
-#include <convolve_common.hpp>
 #include <kernel/convolve_separable.hpp>
 #include <kernel/gradient.hpp>
-#include <kernel/sort_index.hpp>
+#include <kernel/sort_by_key.hpp>
+#include <kernel/range.hpp>
 #include <kernel_headers/harris.hpp>
 #include <memory.hpp>
 #include <map>
@@ -56,7 +56,7 @@ void gaussian1D(T* out, const int dim, double sigma=0.0)
         out[k] /= sum;
 }
 
-template<typename T, typename convAccT, unsigned fLen>
+template<typename T, typename convAccT>
 void conv_helper(Param &ixx, Param &ixy, Param &iyy, Param &filter)
 {
     Param ixx_tmp, ixy_tmp, iyy_tmp;
@@ -73,12 +73,12 @@ void conv_helper(Param &ixx, Param &ixy, Param &iyy, Param &filter)
     ixy_tmp.data = bufferAlloc(ixy_tmp.info.dims[3] * ixy_tmp.info.strides[3] * sizeof(convAccT));
     iyy_tmp.data = bufferAlloc(iyy_tmp.info.dims[3] * iyy_tmp.info.strides[3] * sizeof(convAccT));
 
-    convolve2<T, convAccT, 0, false, fLen>(ixx_tmp, ixx, filter);
-    convolve2<T, convAccT, 1, false, fLen>(ixx, ixx_tmp, filter);
-    convolve2<T, convAccT, 0, false, fLen>(ixy_tmp, ixy, filter);
-    convolve2<T, convAccT, 1, false, fLen>(ixy, ixy_tmp, filter);
-    convolve2<T, convAccT, 0, false, fLen>(iyy_tmp, iyy, filter);
-    convolve2<T, convAccT, 1, false, fLen>(iyy, iyy_tmp, filter);
+    convSep<T, convAccT, 0, false>(ixx_tmp, ixx, filter);
+    convSep<T, convAccT, 1, false>(ixx, ixx_tmp, filter);
+    convSep<T, convAccT, 0, false>(ixy_tmp, ixy, filter);
+    convSep<T, convAccT, 1, false>(ixy, ixy_tmp, filter);
+    convSep<T, convAccT, 0, false>(iyy_tmp, iyy, filter);
+    convSep<T, convAccT, 1, false>(iyy, iyy_tmp, filter);
 
     bufferFree(ixx_tmp.data);
     bufferFree(ixy_tmp.data);
@@ -182,7 +182,7 @@ void harris(unsigned* corners_out,
         const NDRange local_so(HARRIS_THREADS_PER_GROUP, 1);
         const NDRange global_so(blk_x_so * HARRIS_THREADS_PER_GROUP, 1);
 
-        auto soOp = make_kernel<Buffer, Buffer, Buffer,
+        auto soOp = KernelFunctor<Buffer, Buffer, Buffer,
                                 unsigned, Buffer, Buffer> (*soKernel[device]);
 
         // Compute second-order derivatives
@@ -195,38 +195,7 @@ void harris(unsigned* corners_out,
         bufferFree(iy.data);
 
         // Convolve second order derivatives with proper window filter
-        switch (filter_len) {
-            case 3:  conv_helper<T, convAccT, 3 >(ixx, ixy, iyy, filter); break;
-            case 4:  conv_helper<T, convAccT, 4 >(ixx, ixy, iyy, filter); break;
-            case 5:  conv_helper<T, convAccT, 5 >(ixx, ixy, iyy, filter); break;
-            case 6:  conv_helper<T, convAccT, 6 >(ixx, ixy, iyy, filter); break;
-            case 7:  conv_helper<T, convAccT, 7 >(ixx, ixy, iyy, filter); break;
-            case 8:  conv_helper<T, convAccT, 8 >(ixx, ixy, iyy, filter); break;
-            case 9:  conv_helper<T, convAccT, 9 >(ixx, ixy, iyy, filter); break;
-            case 10: conv_helper<T, convAccT, 10>(ixx, ixy, iyy, filter); break;
-            case 11: conv_helper<T, convAccT, 11>(ixx, ixy, iyy, filter); break;
-            case 12: conv_helper<T, convAccT, 12>(ixx, ixy, iyy, filter); break;
-            case 13: conv_helper<T, convAccT, 13>(ixx, ixy, iyy, filter); break;
-            case 14: conv_helper<T, convAccT, 14>(ixx, ixy, iyy, filter); break;
-            case 15: conv_helper<T, convAccT, 15>(ixx, ixy, iyy, filter); break;
-            case 16: conv_helper<T, convAccT, 16>(ixx, ixy, iyy, filter); break;
-            case 17: conv_helper<T, convAccT, 17>(ixx, ixy, iyy, filter); break;
-            case 18: conv_helper<T, convAccT, 18>(ixx, ixy, iyy, filter); break;
-            case 19: conv_helper<T, convAccT, 19>(ixx, ixy, iyy, filter); break;
-            case 20: conv_helper<T, convAccT, 20>(ixx, ixy, iyy, filter); break;
-            case 21: conv_helper<T, convAccT, 21>(ixx, ixy, iyy, filter); break;
-            case 22: conv_helper<T, convAccT, 22>(ixx, ixy, iyy, filter); break;
-            case 23: conv_helper<T, convAccT, 23>(ixx, ixy, iyy, filter); break;
-            case 24: conv_helper<T, convAccT, 24>(ixx, ixy, iyy, filter); break;
-            case 25: conv_helper<T, convAccT, 25>(ixx, ixy, iyy, filter); break;
-            case 26: conv_helper<T, convAccT, 26>(ixx, ixy, iyy, filter); break;
-            case 27: conv_helper<T, convAccT, 27>(ixx, ixy, iyy, filter); break;
-            case 28: conv_helper<T, convAccT, 28>(ixx, ixy, iyy, filter); break;
-            case 29: conv_helper<T, convAccT, 29>(ixx, ixy, iyy, filter); break;
-            case 30: conv_helper<T, convAccT, 30>(ixx, ixy, iyy, filter); break;
-            case 31: conv_helper<T, convAccT, 31>(ixx, ixy, iyy, filter); break;
-        }
-
+        conv_helper<T, convAccT>(ixx, ixy, iyy, filter);
         bufferFree(filter.data);
 
         cl::Buffer *d_responses = bufferAlloc(in.info.dims[3] * in.info.strides[3] * sizeof(T));
@@ -237,7 +206,7 @@ void harris(unsigned* corners_out,
         const NDRange local_hr(HARRIS_THREADS_X, HARRIS_THREADS_Y);
         const NDRange global_hr(blk_x_hr * HARRIS_THREADS_X, blk_y_hr * HARRIS_THREADS_Y);
 
-        auto hrOp = make_kernel<Buffer, unsigned, unsigned,
+        auto hrOp = KernelFunctor<Buffer, unsigned, unsigned,
                                 Buffer, Buffer, Buffer,
                                 float, unsigned> (*hrKernel[device]);
 
@@ -265,7 +234,7 @@ void harris(unsigned* corners_out,
 
         const float min_r = (max_corners > 0) ? 0.f : min_response;
 
-        auto nmOp = make_kernel<Buffer, Buffer, Buffer, Buffer,
+        auto nmOp = KernelFunctor<Buffer, Buffer, Buffer, Buffer,
                                 Buffer, unsigned, unsigned,
                                 float, unsigned, unsigned> (*nmKernel[device]);
 
@@ -315,10 +284,12 @@ void harris(unsigned* corners_out,
 
             int sort_elem = harris_resp.info.strides[3] * harris_resp.info.dims[3];
             harris_resp.data = d_resp_corners;
+            // Create indices using range
             harris_idx.data = bufferAlloc(sort_elem * sizeof(unsigned));
+            kernel::range<uint>(harris_idx, 0);
 
             // Sort Harris responses
-            sort0_index<float, false>(harris_resp, harris_idx);
+            kernel::sort0ByKey<float, uint>(harris_resp, harris_idx, false);
 
             x_out.data = bufferAlloc(*corners_out * sizeof(float));
             y_out.data = bufferAlloc(*corners_out * sizeof(float));
@@ -329,7 +300,7 @@ void harris(unsigned* corners_out,
             const NDRange local_kc(HARRIS_THREADS_PER_GROUP, 1);
             const NDRange global_kc(blk_x_kc * HARRIS_THREADS_PER_GROUP, 1);
 
-            auto kcOp = make_kernel<Buffer, Buffer, Buffer,
+            auto kcOp = KernelFunctor<Buffer, Buffer, Buffer,
                                     Buffer, Buffer, Buffer, Buffer,
                                     unsigned> (*kcKernel[device]);
 

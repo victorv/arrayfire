@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <handle.hpp>
 #include <assign.hpp>
@@ -78,11 +76,13 @@ INSTANTIATE(cdouble)
 INSTANTIATE(double )
 INSTANTIATE(cfloat )
 INSTANTIATE(float  )
-INSTANTIATE(uintl  )
+INSTANTIATE(int    )
 INSTANTIATE(uint   )
 INSTANTIATE(intl   )
-INSTANTIATE(int    )
+INSTANTIATE(uintl  )
 INSTANTIATE(uchar  )
 INSTANTIATE(char   )
+INSTANTIATE(short  )
+INSTANTIATE(ushort )
 
 }

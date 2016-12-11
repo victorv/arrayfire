@@ -28,6 +28,7 @@ namespace af
     */
     AFAPI array sum(const array &in, const int dim = -1);
 
+#if AF_API_VERSION >= 31
     /**
        C++ Interface for sum of elements in an array while replacing nan values
 
@@ -40,6 +41,7 @@ namespace af
 
     */
     AFAPI array sum(const array &in, const int dim, const double nanval);
+#endif
 
     /**
        C++ Interface for product of elements in an array
@@ -54,6 +56,7 @@ namespace af
     */
     AFAPI array product(const array &in, const int dim = -1);
 
+#if AF_API_VERSION >= 31
     /**
        C++ Interface for product of elements in an array while replacing nan values
 
@@ -66,7 +69,7 @@ namespace af
 
     */
     AFAPI array product(const array &in, const int dim, const double nanval);
-
+#endif
 
     /**
        C++ Interface for minimum values in an array
@@ -148,6 +151,7 @@ namespace af
     */
     template<typename T> T sum(const array &in);
 
+#if AF_API_VERSION >= 31
     /**
        C++ Interface for sum of all elements in an array while replacing nan values
 
@@ -158,6 +162,7 @@ namespace af
        \ingroup reduce_func_sum
     */
     template<typename T> T sum(const array &in, double nanval);
+#endif
 
     /**
        C++ Interface for product of all elements in an array
@@ -169,6 +174,7 @@ namespace af
     */
     template<typename T> T product(const array &in);
 
+#if AF_API_VERSION >= 31
     /**
        C++ Interface for product of all elements in an array while replacing nan values
 
@@ -179,6 +185,7 @@ namespace af
        \ingroup reduce_func_product
     */
     template<typename T> T product(const array &in, double nanval);
+#endif
 
     /**
        C++ Interface for getting minimum value of an array
@@ -309,6 +316,35 @@ namespace af
     */
     AFAPI array accum(const array &in, const int dim = 0);
 
+#if AF_API_VERSION >=34
+    /**
+       C++ Interface generalized scan of an array
+
+       \param[in] in is the input array
+       \param[in] dim The dimension along which scan is performed
+       \param[in] op is the type of binary operation used
+       \param[in] inclusive_scan is flag specifying whether scan is inclusive
+       \return the output containing scan of the input
+
+       \ingroup scan_func_scan
+    */
+    AFAPI array scan(const array &in, const int dim = 0, binaryOp op = AF_BINARY_ADD, bool inclusive_scan = true);
+
+    /**
+       C++ Interface generalized scan by key of an array
+
+       \param[in] key is the key array
+       \param[in] in is the input array
+       \param[in] dim The dimension along which scan is performed
+       \param[in] op is the type of binary operations used
+       \param[in] inclusive_scan is flag specifying whether scan is inclusive
+       \return the output containing scan of the input
+
+       \ingroup scan_func_scanbykey
+    */
+    AFAPI array scanByKey(const array &key, const array& in, const int dim = 0, binaryOp op = AF_BINARY_ADD, bool inclusive_scan = true);
+#endif
+
     /**
        C++ Interface for finding the locations of non-zero values in an array
 
@@ -350,8 +386,6 @@ namespace af
        \return the sorted output
 
        \ingroup sort_func_sort
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI array sort(const array &in, const unsigned dim = 0, const bool isAscending = true);
 
@@ -365,8 +399,6 @@ namespace af
        \param[in] isAscending specifies the sorting order
 
        \ingroup sort_func_sort_index
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI void  sort(array &out, array &indices, const array &in, const unsigned dim = 0,
                      const bool isAscending = true);
@@ -381,8 +413,6 @@ namespace af
        \param[in] isAscending specifies the sorting order
 
        \ingroup sort_func_sort_keys
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI void  sort(array &out_keys, array &out_values, const array &keys, const array &values,
                      const unsigned dim = 0, const bool isAscending = true);
@@ -440,6 +470,7 @@ extern "C" {
     */
     AFAPI af_err af_sum(af_array *out, const af_array in, const int dim);
 
+#if AF_API_VERSION >= 31
     /**
        C Interface for sum of elements in an array while replacing nans
 
@@ -452,6 +483,7 @@ extern "C" {
        \ingroup reduce_func_sum
     */
     AFAPI af_err af_sum_nan(af_array *out, const af_array in, const int dim, const double nanval);
+#endif
 
     /**
        C Interface for product of elements in an array
@@ -465,6 +497,7 @@ extern "C" {
     */
     AFAPI af_err af_product(af_array *out, const af_array in, const int dim);
 
+#if AF_API_VERSION >= 31
     /**
        C Interface for product of elements in an array while replacing nans
 
@@ -477,6 +510,7 @@ extern "C" {
        \ingroup reduce_func_product
     */
     AFAPI af_err af_product_nan(af_array *out, const af_array in, const int dim, const double nanval);
+#endif
 
     /**
        C Interface for minimum values in an array
@@ -552,12 +586,14 @@ extern "C" {
     */
     AFAPI af_err af_sum_all(double *real, double *imag, const af_array in);
 
+#if AF_API_VERSION >= 31
     /**
        C Interface for sum of all elements in an array while replacing nans
 
        \param[out] real will contain the real part of adding all elements in input \p in
        \param[out] imag will contain the imaginary part of adding all elements in input \p in
        \param[in] in is the input array
+       \param[in] nanval is the value which replaces nan
        \return \ref AF_SUCCESS if the execution completes properly
 
        \note \p imag is always set to 0 when \p in is real
@@ -565,6 +601,7 @@ extern "C" {
        \ingroup reduce_func_sum
     */
     AFAPI af_err af_sum_nan_all(double *real, double *imag, const af_array in, const double nanval);
+#endif
 
     /**
        C Interface for product of all elements in an array
@@ -580,12 +617,14 @@ extern "C" {
     */
     AFAPI af_err af_product_all(double *real, double *imag, const af_array in);
 
+#if AF_API_VERSION >= 31
     /**
        C Interface for product of all elements in an array while replacing nans
 
        \param[out] real will contain the real part of adding all elements in input \p in
        \param[out] imag will contain the imaginary part of adding all elements in input \p in
        \param[in] in is the input array
+       \param[in] nanval is the value which replaces nan
        \return \ref AF_SUCCESS if the execution completes properly
 
        \note \p imag is always set to 0 when \p in is real
@@ -593,6 +632,7 @@ extern "C" {
        \ingroup reduce_func_product
     */
     AFAPI af_err af_product_nan_all(double *real, double *imag, const af_array in, const double nanval);
+#endif
 
     /**
        C Interface for getting minimum value of an array
@@ -732,6 +772,37 @@ extern "C" {
     */
     AFAPI af_err af_accum(af_array *out, const af_array in, const int dim);
 
+#if AF_API_VERSION >=34
+    /**
+       C Interface generalized scan of an array
+
+       \param[out] out will contain scan of the input
+       \param[in] in is the input array
+       \param[in] dim The dimension along which scan is performed
+       \param[in] op is the type of binary operations used
+       \param[in] inclusive_scan is flag specifying whether scan is inclusive
+       \return \ref AF_SUCCESS if the execution completes properly
+
+       \ingroup scan_func_scan
+    */
+    AFAPI af_err af_scan(af_array *out, const af_array in, const int dim, af_binary_op op, bool inclusive_scan);
+
+    /**
+       C Interface generalized scan by key of an array
+
+       \param[out] out will contain scan of the input
+       \param[in] key is the key array
+       \param[in] in is the input array
+       \param[in] dim The dimension along which scan is performed
+       \param[in] op is the type of binary operations used
+       \param[in] inclusive_scan is flag specifying whether scan is inclusive
+       \return \ref AF_SUCCESS if the execution completes properly
+
+       \ingroup scan_func_scanbykey
+    */
+    AFAPI af_err af_scan_by_key(af_array *out, const af_array key, const af_array in, const int dim, af_binary_op op, bool inclusive_scan);
+#endif
+
     /**
        C Interface for finding the locations of non-zero values in an array
 
@@ -777,8 +848,6 @@ extern "C" {
        \return \ref AF_SUCCESS if the execution completes properly
 
        \ingroup sort_func_sort
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI af_err af_sort(af_array *out, const af_array in, const unsigned dim, const bool isAscending);
 
@@ -793,8 +862,6 @@ extern "C" {
        \return \ref AF_SUCCESS if the execution completes properly
 
        \ingroup sort_func_sort_index
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI af_err af_sort_index(af_array *out, af_array *indices, const af_array in,
                                const unsigned dim, const bool isAscending);
@@ -810,8 +877,6 @@ extern "C" {
        \return \ref AF_SUCCESS if the execution completes properly
 
        \ingroup sort_func_sort_keys
-
-       \note \p dim is currently restricted to 0.
     */
     AFAPI af_err af_sort_by_key(af_array *out_keys, af_array *out_values,
                                 const af_array keys, const af_array values,

@@ -12,9 +12,10 @@
 __kernel
 void initial_label(global    T * equiv_map,
                    KParam        eInfo,
-                   global char * bin,
+                   global char * bin_,
                    KParam        bInfo)
 {
+    global char *bin = bin_ + bInfo.offset;
     const int base_x = (get_group_id(0) * get_local_size(0) * N_PER_THREAD) + get_local_id(0);
     const int base_y = (get_group_id(1) * get_local_size(1) * N_PER_THREAD) + get_local_id(1);
 
@@ -36,10 +37,11 @@ void initial_label(global    T * equiv_map,
 __kernel
 void final_relabel(global       T    * equiv_map,
                    KParam              eInfo,
-                   global       char * bin,
+                   global       char * bin_,
                    KParam              bInfo,
                    global const T    * d_tmp)
 {
+    global char *bin = bin_ + bInfo.offset;
     const int base_x = (get_group_id(0) * get_local_size(0) * N_PER_THREAD) + get_local_id(0);
     const int base_y = (get_group_id(1) * get_local_size(1) * N_PER_THREAD) + get_local_id(1);
 
@@ -58,13 +60,14 @@ void final_relabel(global       T    * equiv_map,
     }
 }
 
-#define MIN(A,B) ((A < B) ? (A) : (B))
-
 // When two labels are equivalent, choose the lower label, but
 // do not choose zero, which indicates invalid.
 //#if T == double
-static inline T relabel(const T a, const T b) {
-    return MIN((a + (LIMIT_MAX * (a == 0))),(b + (LIMIT_MAX * (b == 0))));
+static inline T relabel(const T a, const T b)
+{
+    T aa = (a == 0) ? LIMIT_MAX : a;
+    T bb = (b == 0) ? LIMIT_MAX : b;
+    return min(aa, bb);
 }
 
 // The following kernel updates the equivalency map.  This kernel

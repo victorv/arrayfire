@@ -14,6 +14,33 @@
 #ifdef __cplusplus
 namespace af
 {
+#if AF_API_VERSION >= 31
+    /**
+       C++ Interface for SVD decomposition
+
+       \param[out] u is the output array containing U
+       \param[out] s is the output array containing the diagonal values of sigma, (singular values of the input matrix))
+       \param[out] vt is the output array containing V^H
+       \param[in] in is the input matrix
+
+       \ingroup lapack_factor_func_svd
+    */
+    AFAPI void svd(array &u, array &s, array &vt, const array &in);
+#endif
+
+#if AF_API_VERSION >= 31
+    /**
+       C++ Interface for SVD decomposition
+
+       \param[out] u is the output array containing U
+       \param[out] s is the output array containing the diagonal values of sigma, (singular values of the input matrix))
+       \param[out] vt is the output array containing V^H
+       \param[inout] in is the input matrix and will contain random data after this operation
+
+       \ingroup lapack_factor_func_svd
+    */
+    AFAPI void svdInPlace(array &u, array &s, array &vt, array &in);
+#endif
 
     /**
        C++ Interface for LU decomposition in packed format
@@ -210,11 +237,51 @@ namespace af
     */
     AFAPI double norm(const array &in, const normType type=AF_NORM_EUCLID,
                       const double p=1, const double q=1);
+
+#if AF_API_VERSION >= 33
+    /**
+       Returns true is ArrayFire is compiled with LAPACK support
+
+       \returns true is LAPACK support is available, false otherwise
+
+       \ingroup lapack_ops_func_norm
+    */
+    AFAPI bool isLAPACKAvailable();
+#endif
+
 }
 #endif
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if AF_API_VERSION >= 31
+    /**
+       C Interface for SVD decomposition
+
+       \param[out] u is the output array containing U
+       \param[out] s is the output array containing the diagonal values of sigma, (singular values of the input matrix))
+       \param[out] vt is the output array containing V^H
+       \param[in] in is the input matrix
+
+       \ingroup lapack_factor_func_svd
+    */
+    AFAPI af_err af_svd(af_array *u, af_array *s, af_array *vt, const af_array in);
+#endif
+
+#if AF_API_VERSION >= 31
+    /**
+       C Interface for SVD decomposition
+
+       \param[out] u is the output array containing U
+       \param[out] s is the output array containing the diagonal values of sigma, (singular values of the input matrix))
+       \param[out] vt is the output array containing V^H
+       \param[inout] in is the input matrix that will contain random data after this operation
+
+       \ingroup lapack_factor_func_svd
+    */
+    AFAPI af_err af_svd_inplace(af_array *u, af_array *s, af_array *vt, af_array in);
 #endif
 
     /**
@@ -369,6 +436,19 @@ extern "C" {
        \ingroup lapack_ops_func_norm
     */
     AFAPI af_err af_norm(double *out, const af_array in, const af_norm_type type, const double p, const double q);
+
+#if AF_API_VERSION >= 33
+    /**
+       Returns true is ArrayFire is compiled with LAPACK support
+
+       \param[out] out is true if LAPACK support is available, false otherwise
+
+       \returns AF_SUCCESS if successful (does not depend on the value of out)
+
+       \ingroup lapack_ops_func_norm
+    */
+    AFAPI af_err af_is_lapack_available(bool *out);
+#endif
 
 
 #ifdef __cplusplus

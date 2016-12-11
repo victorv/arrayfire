@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <sobel.hpp>
 #include <kernel/sobel.hpp>
@@ -44,5 +42,7 @@ INSTANTIATE(int   , int)
 INSTANTIATE(uint  , int)
 INSTANTIATE(char  , int)
 INSTANTIATE(uchar , int)
+INSTANTIATE(short , int)
+INSTANTIATE(ushort, int)
 
 }

@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <af/constants.h>
 #include <dispatch.hpp>
 #include <err_cuda.hpp>
@@ -15,10 +14,10 @@
 #include <memory.hpp>
 
 #include "config.hpp"
-#include <convolve_common.hpp>
 #include "convolve.hpp"
 #include "gradient.hpp"
-#include "sort_index.hpp"
+#include "sort_by_key.hpp"
+#include "range.hpp"
 
 namespace cuda
 {
@@ -216,7 +215,8 @@ void harris(unsigned* corners_out,
 
     int filter_elem = filter.strides[3] * filter.dims[3];
     filter.ptr = memAlloc<convAccT>(filter_elem);
-    CUDA_CHECK(cudaMemcpy(filter.ptr, h_filter, filter_elem * sizeof(convAccT), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(filter.ptr, h_filter, filter_elem * sizeof(convAccT),
+                cudaMemcpyHostToDevice, cuda::getStream(cuda::getActiveDeviceId())));
 
     delete[] h_filter;
 
@@ -248,8 +248,9 @@ void harris(unsigned* corners_out,
     // Compute second-order derivatives
     dim3 threads(THREADS_PER_BLOCK, 1);
     dim3 blocks(divup(in.dims[3] * in.strides[3], threads.x), 1);
-    second_order_deriv<T><<<blocks, threads>>>(ixx.ptr, ixy.ptr, iyy.ptr,
-                                               in.dims[3] * in.strides[3], ix.ptr, iy.ptr);
+    CUDA_LAUNCH((second_order_deriv<T>), blocks, threads,
+            ixx.ptr, ixy.ptr, iyy.ptr,
+            in.dims[3] * in.strides[3], ix.ptr, iy.ptr);
 
     memFree(ix.ptr);
     memFree(iy.ptr);
@@ -275,7 +276,8 @@ void harris(unsigned* corners_out,
     unsigned corner_lim = in.dims[3] * in.strides[3] * 0.2f;
 
     unsigned* d_corners_found = memAlloc<unsigned>(1);
-    CUDA_CHECK(cudaMemset(d_corners_found, 0, sizeof(unsigned)));
+    CUDA_CHECK(cudaMemsetAsync(d_corners_found, 0, sizeof(unsigned),
+                cuda::getStream(cuda::getActiveDeviceId())));
 
     float* d_x_corners = memAlloc<float>(corner_lim);
     float* d_y_corners = memAlloc<float>(corner_lim);
@@ -287,10 +289,9 @@ void harris(unsigned* corners_out,
     threads = dim3(BLOCK_SIZE, BLOCK_SIZE);
     blocks = dim3(divup(in.dims[1] - border_len*2, threads.x),
                   divup(in.dims[0] - border_len*2, threads.y));
-    harris_responses<T><<<blocks, threads>>>(d_responses,
-                                             in.dims[0], in.dims[1],
-                                             ixx.ptr, ixy.ptr, iyy.ptr,
-                                             k_thr, border_len);
+    CUDA_LAUNCH((harris_responses<T>), blocks, threads,
+            d_responses, in.dims[0], in.dims[1],
+            ixx.ptr, ixy.ptr, iyy.ptr, k_thr, border_len);
 
     memFree(ixx.ptr);
     memFree(ixy.ptr);
@@ -299,13 +300,14 @@ void harris(unsigned* corners_out,
     const float min_r = (max_corners > 0) ? 0.f : min_response;
 
     // Perform non-maximal suppression
-    non_maximal<T><<<blocks, threads>>>(d_x_corners, d_y_corners,
-                                        d_resp_corners, d_corners_found,
-                                        in.dims[0], in.dims[1], d_responses,
-                                        min_r, border_len, corner_lim);
+    CUDA_LAUNCH((non_maximal<T>), blocks, threads,
+            d_x_corners, d_y_corners, d_resp_corners, d_corners_found,
+            in.dims[0], in.dims[1], d_responses, min_r, border_len, corner_lim);
 
     unsigned corners_found = 0;
-    CUDA_CHECK(cudaMemcpy(&corners_found, d_corners_found, sizeof(unsigned), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpyAsync(&corners_found, d_corners_found, sizeof(unsigned),
+                cudaMemcpyDeviceToHost, cuda::getStream(cuda::getActiveDeviceId())));
+    CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
 
     memFree(d_responses);
     memFree(d_corners_found);
@@ -333,10 +335,12 @@ void harris(unsigned* corners_out,
 
         int sort_elem = harris_responses.strides[3] * harris_responses.dims[3];
         harris_responses.ptr = d_resp_corners;
+        // Create indices using range
         harris_idx.ptr = memAlloc<unsigned>(sort_elem);
+        kernel::range<uint>(harris_idx, 0);
 
         // Sort Harris responses
-        sort0_index<float, false>(harris_responses, harris_idx);
+        sort0ByKey<float, uint>(harris_responses, harris_idx, false);
 
         *x_out = memAlloc<float>(*corners_out);
         *y_out = memAlloc<float>(*corners_out);
@@ -346,10 +350,9 @@ void harris(unsigned* corners_out,
         // responses
         threads = dim3(THREADS_PER_BLOCK, 1);
         blocks = dim3(divup(*corners_out, threads.x), 1);
-        keep_corners<<<blocks, threads>>>(*x_out, *y_out, *resp_out,
-                                          d_x_corners, d_y_corners,
-                                          harris_responses.ptr, harris_idx.ptr,
-                                          *corners_out);
+        CUDA_LAUNCH(keep_corners, blocks, threads,
+                *x_out, *y_out, *resp_out, d_x_corners, d_y_corners,
+                harris_responses.ptr, harris_idx.ptr, *corners_out);
 
         memFree(d_x_corners);
         memFree(d_y_corners);
@@ -360,9 +363,12 @@ void harris(unsigned* corners_out,
         *x_out = memAlloc<float>(*corners_out);
         *y_out = memAlloc<float>(*corners_out);
         *resp_out = memAlloc<float>(*corners_out);
-        CUDA_CHECK(cudaMemcpy(*x_out, d_x_corners, *corners_out * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*y_out, d_y_corners, *corners_out * sizeof(float), cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaMemcpy(*resp_out, d_resp_corners, *corners_out * sizeof(float), cudaMemcpyDeviceToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(*x_out, d_x_corners, *corners_out * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*y_out, d_y_corners, *corners_out * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaMemcpyAsync(*resp_out, d_resp_corners, *corners_out * sizeof(float),
+                    cudaMemcpyDeviceToDevice, cuda::getStream(cuda::getActiveDeviceId())));
 
         memFree(d_x_corners);
         memFree(d_y_corners);

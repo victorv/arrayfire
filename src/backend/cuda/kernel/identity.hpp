@@ -23,14 +23,14 @@ namespace kernel
     __global__
     static void identity_kernel(Param<T> out, int blocks_x, int blocks_y)
     {
-        unsigned idz = blockIdx.x / blocks_x;
-        unsigned idw = blockIdx.y / blocks_y;
+        const dim_t idz = blockIdx.x / blocks_x;
+        const dim_t idw = blockIdx.y / blocks_y;
 
-        unsigned blockIdx_x = blockIdx.x - idz * blocks_x;
-        unsigned blockIdx_y = blockIdx.y - idw * blocks_y;
+        const dim_t blockIdx_x = blockIdx.x - idz * blocks_x;
+        const dim_t blockIdx_y = blockIdx.y - idw * blocks_y;
 
-        unsigned idx = threadIdx.x + blockIdx_x * blockDim.x;
-        unsigned idy = threadIdx.y + blockIdx_y * blockDim.y;
+        const dim_t idx = threadIdx.x + blockIdx_x * blockDim.x;
+        const dim_t idy = threadIdx.y + blockIdx_y * blockDim.y;
 
         if(idx >= out.dims[0] ||
            idy >= out.dims[1] ||
@@ -38,8 +38,11 @@ namespace kernel
            idw >= out.dims[3])
             return;
 
+        const T one  = scalar<T>(1);
+        const T zero = scalar<T>(0);
+
         T *ptr = out.ptr + idz * out.strides[2] + idw * out.strides[3];
-        T val = (idx == idy) ? scalar<T>(1) : scalar<T>(0);
+        T val = (idx == idy) ? one : zero;
         ptr[idx + idy * out.strides[1]] = val;
     }
 
@@ -51,7 +54,7 @@ namespace kernel
         int blocks_y = divup(out.dims[1], threads.y);
         dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
 
-        identity_kernel<T> <<<blocks, threads>>> (out, blocks_x, blocks_y);
+        CUDA_LAUNCH((identity_kernel<T>), blocks, threads, out, blocks_x, blocks_y);
         POST_LAUNCH_CHECK();
     }
 }

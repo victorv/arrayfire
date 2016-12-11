@@ -17,11 +17,14 @@
 #include <dispatch.hpp>
 #include <Param.hpp>
 #include <debug_opencl.hpp>
+#include <type_util.hpp>
+#include <math.hpp>
+#include "config.hpp"
 
 using cl::Buffer;
 using cl::Program;
 using cl::Kernel;
-using cl::make_kernel;
+using cl::KernelFunctor;
 using cl::EnqueueArgs;
 using cl::NDRange;
 using std::string;
@@ -45,10 +48,12 @@ namespace opencl
                 int device = getActiveDeviceId();
 
                 std::call_once( compileFlags[device], [device] () {
+                    ToNumStr<T> toNumStr;
                     std::ostringstream options;
                     options << " -D T=" << dtype_traits<T>::getName()
                             << " -D TX=" << TX
-                            << " -D TY=" << TY;
+                            << " -D TY=" << TY
+                            << " -D ZERO=" << toNumStr(scalar<T>(0));
 
                     if((af_dtype) dtype_traits<T>::af_type == c32 ||
                        (af_dtype) dtype_traits<T>::af_type == c64) {
@@ -66,7 +71,7 @@ namespace opencl
                     gradKernels[device] = new Kernel(*gradProgs[device], "gradient_kernel");
                 });
 
-                auto gradOp = make_kernel<Buffer, const KParam, Buffer, const KParam,
+                auto gradOp = KernelFunctor<Buffer, const KParam, Buffer, const KParam,
                                     const Buffer, const KParam, const int, const int>
                                         (*gradKernels[device]);
 

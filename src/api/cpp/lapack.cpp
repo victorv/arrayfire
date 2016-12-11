@@ -13,6 +13,24 @@
 
 namespace af
 {
+    void svd(array &u, array &s, array &vt, const array &in)
+    {
+        af_array sl = 0, ul = 0, vtl = 0;
+        AF_THROW(af_svd(&ul, &sl, &vtl, in.get()));
+        s = array(sl);
+        u = array(ul);
+        vt = array(vtl);
+    }
+
+    void svdInPlace(array &u, array &s, array &vt, array &in)
+    {
+        af_array sl = 0, ul = 0, vtl = 0;
+        AF_THROW(af_svd_inplace(&ul, &sl, &vtl, in.get()));
+        s = array(sl);
+        u = array(ul);
+        vt = array(vtl);
+    }
+
     void lu(array &out, array &pivot, const array &in, const bool is_lapack_piv)
     {
         out = in.copy();
@@ -133,6 +151,13 @@ namespace af
     {
         double out;
         AF_THROW(af_norm(&out, in.get(), type, p, q));
+        return out;
+    }
+
+    bool isLAPACKAvailable()
+    {
+        bool out = false;
+        AF_THROW(af_is_lapack_available(&out));
         return out;
     }
 }

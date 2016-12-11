@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <ops.hpp>
 #include <backend.hpp>
 #include <Param.hpp>
@@ -101,7 +100,7 @@ namespace kernel
         int otmp_elements = otmp.strides[3] * otmp.dims[3];
         otmp.ptr = memAlloc<uint>(otmp_elements);
 
-        scan_first_launcher<T, uint, af_notzero_t, false>(otmp, rtmp, in,
+        scan_first_launcher<T, uint, af_notzero_t, false, true>(otmp, rtmp, in,
                                                           blocks_x, blocks_y,
                                                           threads_x);
 
@@ -113,12 +112,14 @@ namespace kernel
             ltmp.strides[k] = rtmp_elements;
         }
 
-        scan_first<uint, uint, af_add_t>(ltmp, ltmp);
+        scan_first<uint, uint, af_add_t, true>(ltmp, ltmp);
 
         // Get output size and allocate output
         uint total;
-        CUDA_CHECK(cudaMemcpy(&total, rtmp.ptr + rtmp_elements - 1,
-                              sizeof(uint), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpyAsync(&total, rtmp.ptr + rtmp_elements - 1,
+                              sizeof(uint), cudaMemcpyDeviceToHost,
+                              cuda::getStream(cuda::getActiveDeviceId())));
+        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId())));
 
         out.ptr = memAlloc<uint>(total);
 
@@ -135,7 +136,8 @@ namespace kernel
 
         uint lim = divup(otmp.dims[0], (threads_x * blocks_x));
 
-        (get_out_idx<T>)<<<blocks, threads>>>(out.ptr, otmp, rtmp, in, blocks_x, blocks_y, lim);
+        CUDA_LAUNCH((get_out_idx<T>), blocks, threads,
+                out.ptr, otmp, rtmp, in, blocks_x, blocks_y, lim);
         POST_LAUNCH_CHECK();
 
         memFree(rtmp.ptr);

@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <af/dim4.hpp>
-#include <af/defines.h>
-#include <ArrayInfo.hpp>
 #include <Array.hpp>
 #include <handle.hpp>
 #include <index.hpp>
@@ -65,6 +63,7 @@ Array<T> index(const Array<T>& in, const af_index_t idxrs[])
     }
 
     Array<T> out = createEmptyArray<T>(oDims);
+    if(oDims.elements() == 0) { return out; }
 
     kernel::index<T>(out, in, p, bPtrs);
 
@@ -82,11 +81,13 @@ INSTANTIATE(cdouble)
 INSTANTIATE(double )
 INSTANTIATE(cfloat )
 INSTANTIATE(float  )
-INSTANTIATE(uintl  )
+INSTANTIATE(int    )
 INSTANTIATE(uint   )
 INSTANTIATE(intl   )
-INSTANTIATE(int    )
+INSTANTIATE(uintl  )
 INSTANTIATE(uchar  )
 INSTANTIATE(char   )
+INSTANTIATE(short  )
+INSTANTIATE(ushort )
 
 }

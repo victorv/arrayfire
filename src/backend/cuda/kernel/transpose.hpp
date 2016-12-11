@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/defines.h>
 #include <backend.hpp>
 #include <dispatch.hpp>
 #include <Param.hpp>
@@ -103,9 +102,9 @@ namespace kernel
         dim3 blocks(blk_x * in.dims[2], blk_y * in.dims[3]);
 
         if (in.dims[0] % TILE_DIM == 0 && in.dims[1] % TILE_DIM == 0)
-            (transpose<T, conjugate, true >)<<<blocks, threads>>>(out, in, blk_x, blk_y);
+            CUDA_LAUNCH((transpose<T, conjugate, true >), blocks, threads, out, in, blk_x, blk_y);
         else
-            (transpose<T, conjugate, false>)<<<blocks, threads>>>(out, in, blk_x, blk_y);
+            CUDA_LAUNCH((transpose<T, conjugate, false>), blocks, threads, out, in, blk_x, blk_y);
 
         POST_LAUNCH_CHECK();
     }

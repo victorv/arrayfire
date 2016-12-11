@@ -20,6 +20,7 @@
 
 using std::string;
 using std::vector;
+using std::abs;
 using af::dim4;
 
 typedef struct
@@ -27,7 +28,7 @@ typedef struct
     float f[5];
 } feat_t;
 
-bool feat_cmp(feat_t i, feat_t j)
+static bool feat_cmp(feat_t i, feat_t j)
 {
     for (int k = 0; k < 5; k++)
         if (i.f[k] != j.f[k])
@@ -36,7 +37,7 @@ bool feat_cmp(feat_t i, feat_t j)
     return false;
 }
 
-void array_to_feat(vector<feat_t>& feat, float *x, float *y, float *score, float *orientation, float *size, unsigned nfeat)
+static void array_to_feat(vector<feat_t>& feat, float *x, float *y, float *score, float *orientation, float *size, unsigned nfeat)
 {
     feat.resize(nfeat);
     for (unsigned i = 0; i < feat.size(); i++) {
@@ -63,6 +64,7 @@ template<typename T>
 void harrisTest(string pTestFile, float sigma, unsigned block_size)
 {
     if (noDoubleTests<T>()) return;
+    if (noImageIOTests()) return;
 
     vector<dim4>        inDims;
     vector<string>     inFiles;
@@ -164,6 +166,7 @@ void harrisTest(string pTestFile, float sigma, unsigned block_size)
 TEST(FloatHarris, CPP)
 {
     if (noDoubleTests<float>()) return;
+    if (noImageIOTests()) return;
 
     vector<dim4>        inDims;
     vector<string>     inFiles;

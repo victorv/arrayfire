@@ -14,7 +14,6 @@
 #include <backend.hpp>
 #include <convolve.hpp>
 #include <fftconvolve.hpp>
-#include <convolve_common.hpp>
 
 #include <cstdio>
 
@@ -22,7 +21,7 @@ using af::dim4;
 using namespace detail;
 
 template<typename T, typename accT, dim_t baseDim, bool expand>
-inline static af_array convolve(const af_array &s, const af_array &f, ConvolveBatchKind kind)
+inline static af_array convolve(const af_array &s, const af_array &f, AF_BATCH_KIND kind)
 {
     return getHandle(convolve<T, accT, baseDim, expand>(getArray<T>(s), castArray<accT>(f), kind));
 }
@@ -36,29 +35,29 @@ inline static af_array convolve2(const af_array &s, const af_array &c_f, const a
 }
 
 template<dim_t baseDim>
-ConvolveBatchKind identifyBatchKind(const dim4 &sDims, const dim4 &fDims)
+AF_BATCH_KIND identifyBatchKind(const dim4 &sDims, const dim4 &fDims)
 {
     dim_t sn = sDims.ndims();
     dim_t fn = fDims.ndims();
 
     if (sn==baseDim && fn==baseDim)
-        return CONVOLVE_BATCH_NONE;
+        return AF_BATCH_NONE;
     else if (sn==baseDim && (fn>baseDim && fn<=4))
-        return CONVOLVE_BATCH_KERNEL;
+        return AF_BATCH_RHS;
     else if ((sn>baseDim && sn<=4) && fn==baseDim)
-        return CONVOLVE_BATCH_SIGNAL;
+        return AF_BATCH_LHS;
     else if ((sn>baseDim && sn<=4) && (fn>baseDim && fn<=4)) {
         bool doesDimensionsMatch = true;
         bool isInterleaved = true;
         for (dim_t i=baseDim; i<4; i++) {
             doesDimensionsMatch &= (sDims[i] == fDims[i]);
-            isInterleaved &= (sDims[i] == 1 || fDims[i] == 1);
+            isInterleaved &= (sDims[i] == 1 || fDims[i] == 1 || sDims[i] == fDims[i]);
         }
-        if (doesDimensionsMatch) return CONVOLVE_BATCH_SAME;
-        return (isInterleaved ? CONVOLVE_BATCH_DIFF : CONVOLVE_BATCH_UNSUPPORTED);
+        if (doesDimensionsMatch) return AF_BATCH_SAME;
+        return (isInterleaved ? AF_BATCH_DIFF : AF_BATCH_UNSUPPORTED);
     }
     else
-        return CONVOLVE_BATCH_UNSUPPORTED;
+        return AF_BATCH_UNSUPPORTED;
 }
 
 template<dim_t baseDim, bool expand>
@@ -73,9 +72,13 @@ af_err convolve(af_array *out, const af_array signal, const af_array filter)
         dim4 sdims = sInfo.dims();
         dim4 fdims = fInfo.dims();
 
-        ConvolveBatchKind convBT = identifyBatchKind<baseDim>(sdims, fdims);
+        if(fdims.ndims() == 0 || sdims.ndims() ==  0) {
+            return af_retain_array(out, signal);
+        }
 
-        ARG_ASSERT(1, (convBT != CONVOLVE_BATCH_UNSUPPORTED && convBT != CONVOLVE_BATCH_DIFF));
+        AF_BATCH_KIND convBT = identifyBatchKind<baseDim>(sdims, fdims);
+
+        ARG_ASSERT(1, (convBT != AF_BATCH_UNSUPPORTED && convBT != AF_BATCH_DIFF));
 
         af_array output;
         switch(stype) {
@@ -85,6 +88,10 @@ af_err convolve(af_array *out, const af_array signal, const af_array filter)
             case f64: output = convolve<double ,  double, baseDim, expand>(signal, filter, convBT); break;
             case u32: output = convolve<uint   ,   float, baseDim, expand>(signal, filter, convBT); break;
             case s32: output = convolve<int    ,   float, baseDim, expand>(signal, filter, convBT); break;
+            case u16: output = convolve<ushort ,   float, baseDim, expand>(signal, filter, convBT); break;
+            case s16: output = convolve<short  ,   float, baseDim, expand>(signal, filter, convBT); break;
+            case u64: output = convolve<uintl  ,   float, baseDim, expand>(signal, filter, convBT); break;
+            case s64: output = convolve<intl   ,   float, baseDim, expand>(signal, filter, convBT); break;
             case u8:  output = convolve<uchar  ,   float, baseDim, expand>(signal, filter, convBT); break;
             case b8:  output = convolve<char   ,   float, baseDim, expand>(signal, filter, convBT); break;
             default: TYPE_ERROR(1, stype);
@@ -120,6 +127,10 @@ af_err convolve2_sep(af_array *out, af_array col_filter, af_array row_filter, co
             case f64: output = convolve2<double ,  double, expand>(signal, col_filter, row_filter); break;
             case u32: output = convolve2<uint   ,   float, expand>(signal, col_filter, row_filter); break;
             case s32: output = convolve2<int    ,   float, expand>(signal, col_filter, row_filter); break;
+            case u16: output = convolve2<ushort ,   float, expand>(signal, col_filter, row_filter); break;
+            case s16: output = convolve2<short  ,   float, expand>(signal, col_filter, row_filter); break;
+            case u64: output = convolve2<uintl  ,   float, expand>(signal, col_filter, row_filter); break;
+            case s64: output = convolve2<intl   ,   float, expand>(signal, col_filter, row_filter); break;
             case u8:  output = convolve2<uchar  ,   float, expand>(signal, col_filter, row_filter); break;
             case b8:  output = convolve2<char   ,   float, expand>(signal, col_filter, row_filter); break;
             default: TYPE_ERROR(1, signalType);
@@ -144,14 +155,14 @@ bool isFreqDomain(const af_array &signal, const af_array filter, af_conv_domain 
     dim4 sdims = sInfo.dims();
     dim4 fdims = fInfo.dims();
 
-    if (identifyBatchKind<baseDim>(sdims, fdims) == CONVOLVE_BATCH_DIFF) return true;
+    if (identifyBatchKind<baseDim>(sdims, fdims) == AF_BATCH_DIFF) return true;
 
-    int batch = 1;
+    int kbatch = 1;
     for(int i = 3; i >= baseDim; i--) {
-        batch *= std::max(fdims[i], sdims[i]);
+        kbatch *= fdims[i];
     }
 
-    if (batch >= 10) return true;
+    if (kbatch >= 10) return true;
 
     if (baseDim == 1) {
         if (fdims[0] > 128) return true;
@@ -177,44 +188,54 @@ af_err af_convolve1(af_array *out, const af_array signal, const af_array filter,
     try {
         if (isFreqDomain<1>(signal, filter, domain))
             return af_fft_convolve1(out, signal, filter, mode);
-    } CATCHALL;
 
-    if (mode == AF_CONV_EXPAND)
+        if (mode == AF_CONV_EXPAND)
             return convolve<1, true >(out, signal, filter);
-    else
-        return convolve<1, false>(out, signal, filter);
+        else
+            return convolve<1, false>(out, signal, filter);
+    } CATCHALL;
 }
 
 af_err af_convolve2(af_array *out, const af_array signal, const af_array filter, const af_conv_mode mode, af_conv_domain domain)
 {
     try {
+        if (getInfo(signal).dims().ndims()<2 || getInfo(filter).dims().ndims()<2) {
+            return af_convolve1(out, signal, filter, mode, domain);
+        }
+
         if (isFreqDomain<2>(signal, filter, domain))
             return af_fft_convolve2(out, signal, filter, mode);
-    } CATCHALL;
 
-    if (mode == AF_CONV_EXPAND)
-        return convolve<2, true >(out, signal, filter);
-    else
-        return convolve<2, false>(out, signal, filter);
+        if (mode == AF_CONV_EXPAND)
+            return convolve<2, true >(out, signal, filter);
+        else
+            return convolve<2, false>(out, signal, filter);
+    } CATCHALL;
 }
 
 af_err af_convolve3(af_array *out, const af_array signal, const af_array filter, const af_conv_mode mode, af_conv_domain domain)
 {
     try {
+        if (getInfo(signal).dims().ndims()<3 || getInfo(filter).dims().ndims()<3) {
+            return af_convolve2(out, signal, filter, mode, domain);
+        }
+
         if (isFreqDomain<3>(signal, filter, domain))
             return af_fft_convolve3(out, signal, filter, mode);
-    } CATCHALL;
 
-    if (mode == AF_CONV_EXPAND)
-        return convolve<3, true >(out, signal, filter);
-    else
-        return convolve<3, false>(out, signal, filter);
+        if (mode == AF_CONV_EXPAND)
+            return convolve<3, true >(out, signal, filter);
+        else
+            return convolve<3, false>(out, signal, filter);
+    } CATCHALL;
 }
 
 af_err af_convolve2_sep(af_array *out, const af_array signal, const af_array col_filter, const af_array row_filter, const af_conv_mode mode)
 {
-    if (mode == AF_CONV_EXPAND)
-        return convolve2_sep<true >(out, signal, col_filter, row_filter);
-    else
-        return convolve2_sep<false>(out, signal, col_filter, row_filter);
+    try {
+        if (mode == AF_CONV_EXPAND)
+            return convolve2_sep<true >(out, signal, col_filter, row_filter);
+        else
+            return convolve2_sep<false>(out, signal, col_filter, row_filter);
+    } CATCHALL;
 }

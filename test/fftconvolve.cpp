@@ -17,6 +17,7 @@
 
 using std::vector;
 using std::string;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -35,7 +36,7 @@ class FFTConvolveLarge : public ::testing::Test
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<cfloat, cdouble, float, double, int, uint, char, uchar> TestTypes;
+typedef ::testing::Types<cfloat, cdouble, float, double, int, uint, char, uchar, intl, uintl> TestTypes;
 typedef ::testing::Types<float, double> TestTypesLarge;
 
 // register the type list
@@ -674,6 +675,19 @@ TEST(FFTConvolve2, Interleaved)
     for (int ii = 0; ii < 3; ii++) {
         array c_ii = c(span, span, span, ii);
         array d = fftConvolve2(a, b(span, span, 0, ii));
+        ASSERT_EQ(max<double>(abs(c_ii - d)) < 1E-5, true);
+    }
+}
+
+TEST(FFTConvolve2, Interleaved2)
+{
+    array a = randu(100, 100, 2);
+    array b = randu(5, 5, 2, 3);
+    array c = fftConvolve2(a, b);
+
+    for (int ii = 0; ii < 3; ii++) {
+        array c_ii = c(span, span, span, ii);
+        array d = fftConvolve2(a, b(span, span, span, ii));
         ASSERT_EQ(max<double>(abs(c_ii - d)) < 1E-5, true);
     }
 }

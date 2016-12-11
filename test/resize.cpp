@@ -20,6 +20,7 @@ using std::vector;
 using std::string;
 using std::cout;
 using std::endl;
+using std::abs;
 using af::cfloat;
 using af::cdouble;
 
@@ -54,7 +55,7 @@ class ResizeI : public ::testing::Test
 
 // create a list of types to be tested
 typedef ::testing::Types<float, double, cfloat, cdouble> TestTypesF;
-typedef ::testing::Types<int, unsigned, intl, uintl, unsigned char, char> TestTypesI;
+typedef ::testing::Types<int, unsigned, intl, uintl, unsigned char, char, short, ushort> TestTypesI;
 
 // register the type list
 TYPED_TEST_CASE(Resize, TestTypesF);
@@ -64,7 +65,7 @@ TYPED_TEST(Resize, InvalidDims)
 {
     if (noDoubleTests<TypeParam>()) return;
 
-    vector<TypeParam> in(8,8);
+    vector<TypeParam> in(8*8);
 
     af_array inArray  = 0;
     af_array outArray = 0;

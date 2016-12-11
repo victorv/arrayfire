@@ -9,124 +9,82 @@
 
 #include <Array.hpp>
 #include <sort_by_key.hpp>
-#include <math.hpp>
-#include <stdexcept>
-#include <err_cpu.hpp>
-#include <algorithm>
-#include <numeric>
-#include <queue>
-#include <future>
-
-using std::greater;
-using std::less;
-using std::sort;
-using std::function;
-using std::queue;
-using std::future;
-using std::async;
+#include <platform.hpp>
+#include <queue.hpp>
+#include <copy.hpp>
+#include <range.hpp>
+#include <reorder.hpp>
+#include <kernel/sort_by_key.hpp>
 
 namespace cpu
 {
-    ///////////////////////////////////////////////////////////////////////////
-    // Kernel Functions
-    ///////////////////////////////////////////////////////////////////////////
 
-    template<typename Tk, typename Tv, bool isAscending>
-    void sort0_by_key(Array<Tk> &okey, Array<Tv> &oval, const Array<Tk> &ikey, const Array<Tv> &ival)
-    {
-        function<bool(Tk, Tk)> op = greater<Tk>();
-        if(isAscending) { op = less<Tk>(); }
+template<typename Tk, typename Tv>
+void sort_by_key(Array<Tk> &okey, Array<Tv> &oval,
+                 const Array<Tk> &ikey, const Array<Tv> &ival, const uint dim, bool isAscending)
+{
+    ikey.eval();
+    ival.eval();
 
-        // Get pointers and initialize original index locations
-        Array<uint> oidx = createValueArray(ikey.dims(), 0u);
-            uint *oidx_ptr = oidx.get();
-              Tk *okey_ptr = okey.get();
-              Tv *oval_ptr = oval.get();
-        const Tk *ikey_ptr = ikey.get();
-        const Tv *ival_ptr = ival.get();
+    okey = copyArray<Tk>(ikey);
+    oval = copyArray<Tv>(ival);
 
-        std::vector<uint> seq_vec(oidx.dims()[0]);
-        std::iota(seq_vec.begin(), seq_vec.end(), 0);
-
-        const Tk *comp_ptr = nullptr;
-        auto comparator = [&comp_ptr, &op](size_t i1, size_t i2) {return op(comp_ptr[i1], comp_ptr[i2]);};
-
-        for(dim_t w = 0; w < ikey.dims()[3]; w++) {
-            dim_t okeyW = w * okey.strides()[3];
-            dim_t ovalW = w * oval.strides()[3];
-            dim_t oidxW = w * oidx.strides()[3];
-            dim_t ikeyW = w * ikey.strides()[3];
-            dim_t ivalW = w * ival.strides()[3];
-
-            for(dim_t z = 0; z < ikey.dims()[2]; z++) {
-                dim_t okeyWZ = okeyW + z * okey.strides()[2];
-                dim_t ovalWZ = ovalW + z * oval.strides()[2];
-                dim_t oidxWZ = oidxW + z * oidx.strides()[2];
-                dim_t ikeyWZ = ikeyW + z * ikey.strides()[2];
-                dim_t ivalWZ = ivalW + z * ival.strides()[2];
-
-                for(dim_t y = 0; y < ikey.dims()[1]; y++) {
-
-                    dim_t okeyOffset = okeyWZ + y * okey.strides()[1];
-                    dim_t ovalOffset = ovalWZ + y * oval.strides()[1];
-                    dim_t oidxOffset = oidxWZ + y * oidx.strides()[1];
-                    dim_t ikeyOffset = ikeyWZ + y * ikey.strides()[1];
-                    dim_t ivalOffset = ivalWZ + y * ival.strides()[1];
-
-                    uint *ptr = oidx_ptr + oidxOffset;
-                    std::copy(seq_vec.begin(), seq_vec.end(), ptr);
-
-                    comp_ptr = ikey_ptr + ikeyOffset;
-                    std::stable_sort(ptr, ptr + ikey.dims()[0], comparator);
-
-                    for (dim_t i = 0; i < oval.dims()[0]; ++i){
-                        uint sortIdx = oidx_ptr[oidxOffset + i];
-                        okey_ptr[okeyOffset + i] = ikey_ptr[ikeyOffset + sortIdx];
-                        oval_ptr[ovalOffset + i] = ival_ptr[ivalOffset + sortIdx];
-                    }
-                }
-            }
-        }
-
-        return;
+    switch(dim) {
+        case 0: getQueue().enqueue(kernel::sort0ByKey<Tk, Tv>, okey, oval, isAscending); break;
+        case 1:
+        case 2:
+        case 3: getQueue().enqueue(kernel::sortByKeyBatched<Tk, Tv>, okey, oval, dim, isAscending); break;
+        default: AF_ERROR("Not Supported", AF_ERR_NOT_SUPPORTED);
     }
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Wrapper Functions
-    ///////////////////////////////////////////////////////////////////////////
-    template<typename Tk, typename Tv, bool isAscending>
-    void sort_by_key(Array<Tk> &okey, Array<Tv> &oval,
-               const Array<Tk> &ikey, const Array<Tv> &ival, const uint dim)
-    {
-        okey = createEmptyArray<Tk>(ikey.dims());
-        oval = createEmptyArray<Tv>(ival.dims());
-        switch(dim) {
-            case 0: sort0_by_key<Tk, Tv, isAscending>(okey, oval, ikey, ival);
-                    break;
-            default: AF_ERROR("Not Supported", AF_ERR_NOT_SUPPORTED);
+    if(dim != 0) {
+        af::dim4 preorderDims = okey.dims();
+        af::dim4 reorderDims(0, 1, 2, 3);
+        reorderDims[dim] = 0;
+        preorderDims[0] = okey.dims()[dim];
+        for(int i = 1; i <= (int)dim; i++) {
+            reorderDims[i - 1] = i;
+            preorderDims[i] = okey.dims()[i - 1];
         }
+
+        okey.setDataDims(preorderDims);
+        oval.setDataDims(preorderDims);
+
+        okey = reorder<Tk>(okey, reorderDims);
+        oval = reorder<Tv>(oval, reorderDims);
     }
+}
 
 #define INSTANTIATE(Tk, Tv)                                             \
     template void                                                       \
-    sort_by_key<Tk, Tv, true>(Array<Tk> &okey, Array<Tv> &oval,         \
-                              const Array<Tk> &ikey, const Array<Tv> &ival, const uint dim); \
-    template void                                                       \
-    sort_by_key<Tk, Tv,false>(Array<Tk> &okey, Array<Tv> &oval,         \
-                              const Array<Tk> &ikey, const Array<Tv> &ival, const uint dim); \
+    sort_by_key<Tk, Tv>(Array<Tk> &okey, Array<Tv> &oval,               \
+                        const Array<Tk> &ikey, const Array<Tv> &ival,   \
+                        const uint dim, bool isAscending);
 
 #define INSTANTIATE1(Tk)       \
     INSTANTIATE(Tk, float)     \
     INSTANTIATE(Tk, double)    \
+    INSTANTIATE(Tk, cfloat)    \
+    INSTANTIATE(Tk, cdouble)   \
     INSTANTIATE(Tk, int)       \
     INSTANTIATE(Tk, uint)      \
     INSTANTIATE(Tk, char)      \
     INSTANTIATE(Tk, uchar)     \
+    INSTANTIATE(Tk, short)     \
+    INSTANTIATE(Tk, ushort)    \
+    INSTANTIATE(Tk, intl)      \
+    INSTANTIATE(Tk, uintl)     \
 
-    INSTANTIATE1(float)
-    INSTANTIATE1(double)
-    INSTANTIATE1(int)
-    INSTANTIATE1(uint)
-    INSTANTIATE1(char)
-    INSTANTIATE1(uchar)
+
+INSTANTIATE1(float)
+INSTANTIATE1(double)
+INSTANTIATE1(int)
+INSTANTIATE1(uint)
+INSTANTIATE1(char)
+INSTANTIATE1(uchar)
+INSTANTIATE1(short)
+INSTANTIATE1(ushort)
+INSTANTIATE1(intl)
+INSTANTIATE1(uintl)
+
 }

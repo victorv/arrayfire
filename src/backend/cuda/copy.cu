@@ -8,8 +8,6 @@
  ********************************************************/
 
 #include <cuda_runtime_api.h>
-#include <af/array.h>
-#include <af/defines.h>
 #include <Array.hpp>
 #include <copy.hpp>
 #include <kernel/memcopy.hpp>
@@ -23,12 +21,12 @@ namespace cuda
     void copyData(T *data, const Array<T> &A)
     {
         // FIXME: Merge this with copyArray
-        evalArray(A);
+        A.eval();
 
         Array<T> out = A;
         const T *ptr = NULL;
 
-        if (A.isOwner() || // No offsets, No strides
+        if (A.isLinear() || // No offsets, No strides
             A.ndims() == 1 // Simple offset, no strides.
             ) {
 
@@ -55,7 +53,8 @@ namespace cuda
         if (A.isLinear()) {
             CUDA_CHECK(cudaMemcpyAsync(out.get(), A.get(),
                                        A.elements() * sizeof(T),
-                                       cudaMemcpyDeviceToDevice));
+                                       cudaMemcpyDeviceToDevice,
+                                       cuda::getStream(cuda::getActiveDeviceId())));
         } else {
             // FIXME: Seems to fail when using Param<T>
             kernel::memcopy(out.get(), out.strides().get(), A.get(), A.dims().get(),
@@ -71,6 +70,12 @@ namespace cuda
         Array<outType> ret = createEmptyArray<outType>(dims);
         kernel::copy<inType, outType>(ret, in, in.ndims(), default_value, factor);
         return ret;
+    }
+
+    template<typename T>
+    void multiply_inplace(Array<T> &in, double val)
+    {
+        kernel::copy<T, T>(in, in, in.ndims(), scalar<T>(0), val);
     }
 
     template<typename inType, typename outType>
@@ -91,7 +96,8 @@ namespace cuda
             {
                 CUDA_CHECK(cudaMemcpyAsync(out.get(), in.get(),
                                            in.elements() * sizeof(T),
-                                           cudaMemcpyDeviceToDevice));
+                                           cudaMemcpyDeviceToDevice,
+                                           cuda::getStream(cuda::getActiveDeviceId())));
             } else {
                 kernel::copy<T, T>(out, in, in.ndims(), scalar<T>(0), 1);
             }
@@ -109,17 +115,20 @@ namespace cuda
 #define INSTANTIATE(T)                                              \
     template void      copyData<T> (T *data, const Array<T> &from); \
     template Array<T> copyArray<T>(const Array<T> &A);              \
+    template void      multiply_inplace<T> (Array<T> &in, double norm); \
 
-    INSTANTIATE(float)
-    INSTANTIATE(double)
-    INSTANTIATE(cfloat)
+    INSTANTIATE(float  )
+    INSTANTIATE(double )
+    INSTANTIATE(cfloat )
     INSTANTIATE(cdouble)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(uchar)
-    INSTANTIATE(char)
+    INSTANTIATE(int    )
+    INSTANTIATE(uint   )
+    INSTANTIATE(uchar  )
+    INSTANTIATE(char   )
     INSTANTIATE(intl   )
     INSTANTIATE(uintl  )
+    INSTANTIATE(short  )
+    INSTANTIATE(ushort )
 
 #define INSTANTIATE_PAD_ARRAY(SRC_T)                                    \
     template Array<float  > padArray<SRC_T, float  >(Array<SRC_T> const &src, dim4 const &dims, float   default_value, double factor); \
@@ -128,8 +137,10 @@ namespace cuda
     template Array<cdouble> padArray<SRC_T, cdouble>(Array<SRC_T> const &src, dim4 const &dims, cdouble default_value, double factor); \
     template Array<int    > padArray<SRC_T, int    >(Array<SRC_T> const &src, dim4 const &dims, int     default_value, double factor); \
     template Array<uint   > padArray<SRC_T, uint   >(Array<SRC_T> const &src, dim4 const &dims, uint    default_value, double factor); \
-    template Array<intl    > padArray<SRC_T, intl    >(Array<SRC_T> const &src, dim4 const &dims, intl     default_value, double factor); \
-    template Array<uintl   > padArray<SRC_T, uintl   >(Array<SRC_T> const &src, dim4 const &dims, uintl    default_value, double factor); \
+    template Array<intl   > padArray<SRC_T, intl   >(Array<SRC_T> const &src, dim4 const &dims, intl    default_value, double factor); \
+    template Array<uintl  > padArray<SRC_T, uintl  >(Array<SRC_T> const &src, dim4 const &dims, uintl   default_value, double factor); \
+    template Array<short  > padArray<SRC_T, short  >(Array<SRC_T> const &src, dim4 const &dims, short   default_value, double factor); \
+    template Array<ushort > padArray<SRC_T, ushort >(Array<SRC_T> const &src, dim4 const &dims, ushort  default_value, double factor); \
     template Array<uchar  > padArray<SRC_T, uchar  >(Array<SRC_T> const &src, dim4 const &dims, uchar   default_value, double factor); \
     template Array<char   > padArray<SRC_T, char   >(Array<SRC_T> const &src, dim4 const &dims, char    default_value, double factor); \
     template void copyArray<SRC_T, float  >(Array<float  > &dst, Array<SRC_T> const &src); \
@@ -138,8 +149,10 @@ namespace cuda
     template void copyArray<SRC_T, cdouble>(Array<cdouble> &dst, Array<SRC_T> const &src); \
     template void copyArray<SRC_T, int    >(Array<int    > &dst, Array<SRC_T> const &src); \
     template void copyArray<SRC_T, uint   >(Array<uint   > &dst, Array<SRC_T> const &src); \
-    template void copyArray<SRC_T, intl    >(Array<intl    > &dst, Array<SRC_T> const &src); \
-    template void copyArray<SRC_T, uintl   >(Array<uintl   > &dst, Array<SRC_T> const &src); \
+    template void copyArray<SRC_T, intl   >(Array<intl   > &dst, Array<SRC_T> const &src); \
+    template void copyArray<SRC_T, uintl  >(Array<uintl  > &dst, Array<SRC_T> const &src); \
+    template void copyArray<SRC_T, short  >(Array<short  > &dst, Array<SRC_T> const &src); \
+    template void copyArray<SRC_T, ushort >(Array<ushort > &dst, Array<SRC_T> const &src); \
     template void copyArray<SRC_T, uchar  >(Array<uchar  > &dst, Array<SRC_T> const &src); \
     template void copyArray<SRC_T, char   >(Array<char   > &dst, Array<SRC_T> const &src);
 
@@ -147,8 +160,10 @@ namespace cuda
     INSTANTIATE_PAD_ARRAY(double)
     INSTANTIATE_PAD_ARRAY(int   )
     INSTANTIATE_PAD_ARRAY(uint  )
-    INSTANTIATE_PAD_ARRAY(intl   )
-    INSTANTIATE_PAD_ARRAY(uintl  )
+    INSTANTIATE_PAD_ARRAY(intl  )
+    INSTANTIATE_PAD_ARRAY(uintl )
+    INSTANTIATE_PAD_ARRAY(short )
+    INSTANTIATE_PAD_ARRAY(ushort)
     INSTANTIATE_PAD_ARRAY(uchar )
     INSTANTIATE_PAD_ARRAY(char  )
 
@@ -175,6 +190,8 @@ namespace cuda
     SPECILIAZE_UNUSED_COPYARRAY(cfloat, int)
     SPECILIAZE_UNUSED_COPYARRAY(cfloat, intl)
     SPECILIAZE_UNUSED_COPYARRAY(cfloat, uintl)
+    SPECILIAZE_UNUSED_COPYARRAY(cfloat, short)
+    SPECILIAZE_UNUSED_COPYARRAY(cfloat, ushort)
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, double)
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, float)
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, uchar)
@@ -183,4 +200,6 @@ namespace cuda
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, int)
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, intl)
     SPECILIAZE_UNUSED_COPYARRAY(cdouble, uintl)
+    SPECILIAZE_UNUSED_COPYARRAY(cdouble, short)
+    SPECILIAZE_UNUSED_COPYARRAY(cdouble, ushort)
 }

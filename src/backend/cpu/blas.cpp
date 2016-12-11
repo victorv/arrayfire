@@ -9,27 +9,55 @@
 
 #include <blas.hpp>
 #include <af/dim4.hpp>
-#include <handle.hpp>
 #include <cassert>
-#include <err_cpu.hpp>
 #include <err_common.hpp>
+#include <kernel/dot.hpp>
+#include <platform.hpp>
+#include <queue.hpp>
 
 namespace cpu
 {
 
-    using std::add_const;
-    using std::add_pointer;
-    using std::enable_if;
-    using std::is_floating_point;
-    using std::remove_const;
-    using std::conditional;
+using std::add_const;
+using std::add_pointer;
+using std::enable_if;
+using std::is_floating_point;
+using std::remove_const;
+using std::conditional;
 
-  // Some implementations of BLAS require void* for complex pointers while
-  // others use float*/double*
-#if (defined(OS_WIN) && !defined(USE_MKL)) || defined(IS_OPENBLAS)
-  static const bool cplx_void_ptr = false;
+// Some implementations of BLAS require void* for complex pointers while others use float*/double*
+//
+// Sample cgemm API
+// OpenBLAS
+// void cblas_cgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB,
+//                  OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+//                  OPENBLAS_CONST float *alpha, OPENBLAS_CONST float *A, OPENBLAS_CONST blasint lda,
+//                  OPENBLAS_CONST float *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float *beta,
+//                  float *C, OPENBLAS_CONST blasint ldc);
+//
+// MKL
+// void cblas_cgemm(const  CBLAS_LAYOUT Layout, const CBLAS_TRANSPOSE TransA, const  CBLAS_TRANSPOSE TransB,
+//                  const MKL_INT M, const MKL_INT N, const MKL_INT K,
+//                  const void *alpha, const void *A, const MKL_INT lda,
+//                  const void *B, const MKL_INT ldb, const void *beta,
+//                  void *C, const MKL_INT ldc);
+// atlas cblas
+// void cblas_cgemm(const enum CBLAS_ORDER Order, const enum CBLAS_TRANSPOSE TransA,
+//                  const enum CBLAS_TRANSPOSE TransB, const int M, const int N, const int K,
+//                  const void *alpha, const void *A, const int lda,
+//                  const void *B, const int ldb, const void *beta,
+//                  void *C, const int ldc);
+//
+// LAPACKE
+// void cblas_cgemm(const enum CBLAS_ORDER Order, const enum CBLAS_TRANSPOSE TransA,
+//                  const enum CBLAS_TRANSPOSE TransB, const int M, const int N, const int K,
+//                  const void *alpha, const void *A, const int lda,
+//                  const void *B, const int ldb, const void *beta,
+//                  void *C, const int ldc);
+#if defined(IS_OPENBLAS)
+    static const bool cplx_void_ptr = false;
 #else
-  static const bool cplx_void_ptr = true;
+    static const bool cplx_void_ptr = true;
 #endif
 
 template<typename T, class Enable = void>
@@ -118,6 +146,9 @@ template<typename T>
 Array<T> matmul(const Array<T> &lhs, const Array<T> &rhs,
                 af_mat_prop optLhs, af_mat_prop optRhs)
 {
+    lhs.eval();
+    rhs.eval();
+
     CBLAS_TRANSPOSE lOpts = toCblasTranspose(optLhs);
     CBLAS_TRANSPOSE rOpts = toCblasTranspose(optRhs);
 
@@ -131,77 +162,60 @@ Array<T> matmul(const Array<T> &lhs, const Array<T> &rhs,
     int N = rDims[bColDim];
     int K = lDims[aColDim];
 
-    //FIXME: Leaks on errors.
-    Array<T> out = createEmptyArray<T>(af::dim4(M, N, 1, 1));
-    auto alpha = getScale<T, 1>();
-    auto beta  = getScale<T, 0>();
-
-    dim4 lStrides = lhs.strides();
-    dim4 rStrides = rhs.strides();
     using BT  =       typename blas_base<T>::type;
     using CBT = const typename blas_base<T>::type;
 
-    if(rDims[bColDim] == 1) {
-        N = lDims[aColDim];
-        gemv_func<T>()(
-            CblasColMajor, lOpts,
-            lDims[0], lDims[1],
-            alpha,
-            reinterpret_cast<CBT*>(lhs.get()), lStrides[1],
-            reinterpret_cast<CBT*>(rhs.get()), rStrides[0],
-            beta,
-            reinterpret_cast<BT*>(out.get()), 1);
-    } else {
-        gemm_func<T>()(
-            CblasColMajor, lOpts, rOpts,
-            M, N, K,
-            alpha,
-            reinterpret_cast<CBT*>(lhs.get()), lStrides[1],
-            reinterpret_cast<CBT*>(rhs.get()), rStrides[1],
-            beta,
-            reinterpret_cast<BT*>(out.get()), out.dims()[0]);
-    }
+    Array<T> out = createEmptyArray<T>(af::dim4(M, N, 1, 1));
+    auto func = [=] (Array<T> output, const Array<T> left, const Array<T> right) {
+        auto alpha = getScale<T, 1>();
+        auto beta  = getScale<T, 0>();
+
+        dim4 lStrides = left.strides();
+        dim4 rStrides = right.strides();
+
+        if(rDims[bColDim] == 1) {
+            gemv_func<T>()(
+                CblasColMajor, lOpts,
+                lDims[0], lDims[1],
+                alpha,
+                reinterpret_cast<CBT*>(left.get()), lStrides[1],
+                reinterpret_cast<CBT*>(right.get()), rStrides[0],
+                beta,
+                reinterpret_cast<BT*>(output.get()), 1);
+        } else {
+            gemm_func<T>()(
+                CblasColMajor, lOpts, rOpts,
+                M, N, K,
+                alpha,
+                reinterpret_cast<CBT*>(left.get()), lStrides[1],
+                reinterpret_cast<CBT*>(right.get()), rStrides[1],
+                beta,
+                reinterpret_cast<BT*>(output.get()), output.dims()[0]);
+        }
+    };
+    getQueue().enqueue(func, out, lhs, rhs);
 
     return out;
-}
-
-template<typename T> T
-conj(T  x) { return x; }
-
-template<> cfloat  conj<cfloat> (cfloat  c) { return std::conj(c); }
-template<> cdouble conj<cdouble>(cdouble c) { return std::conj(c); }
-
-template<typename T, bool conjugate, bool both_conjugate>
-Array<T> dot_(const Array<T> &lhs, const Array<T> &rhs,
-              af_mat_prop optLhs, af_mat_prop optRhs)
-{
-    int N = lhs.dims()[0];
-
-    T out = 0;
-    const T *pL = lhs.get();
-    const T *pR = rhs.get();
-
-    for(int i = 0; i < N; i++)
-        out += (conjugate ? cpu::conj(pL[i]) : pL[i]) * pR[i];
-
-    if(both_conjugate) out = cpu::conj(out);
-
-    return createValueArray(af::dim4(1), out);
 }
 
 template<typename T>
 Array<T> dot(const Array<T> &lhs, const Array<T> &rhs,
              af_mat_prop optLhs, af_mat_prop optRhs)
 {
+    lhs.eval();
+    rhs.eval();
+
+    Array<T> out = createEmptyArray<T>(af::dim4(1));
     if(optLhs == AF_MAT_CONJ && optRhs == AF_MAT_CONJ) {
-        return dot_<T, false, true>(lhs, rhs, optLhs, optRhs);
+        getQueue().enqueue(kernel::dot<T, false, true>, out, lhs, rhs, optLhs, optRhs);
     } else if (optLhs == AF_MAT_CONJ && optRhs == AF_MAT_NONE) {
-        return dot_<T, true, false>(lhs, rhs, optLhs, optRhs);
+        getQueue().enqueue(kernel::dot<T, true, false>,out, lhs, rhs, optLhs, optRhs);
     } else if (optLhs == AF_MAT_NONE && optRhs == AF_MAT_CONJ) {
-        return dot_<T, true, false>(rhs, lhs, optRhs, optLhs);
+        getQueue().enqueue(kernel::dot<T, true, false>,out, rhs, lhs, optRhs, optLhs);
     } else {
-        return dot_<T, false, false>(lhs, rhs, optLhs, optRhs);
+        getQueue().enqueue(kernel::dot<T, false, false>,out, lhs, rhs, optLhs, optRhs);
     }
+    return out;
 }
 
 #undef BT

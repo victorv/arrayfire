@@ -10,21 +10,73 @@
 #include <af/dim4.hpp>
 #include <af/device.h>
 #include <af/version.h>
+#include <af/backend.h>
 #include <backend.hpp>
 #include <platform.hpp>
 #include <Array.hpp>
 #include <handle.hpp>
-#include <memory.hpp>
+#include <sparse_handle.hpp>
 #include "err_common.hpp"
+#include <cstring>
 
 using namespace detail;
+
+af_err af_set_backend(const af_backend bknd)
+{
+    try {
+        ARG_ASSERT(0, bknd==getBackend());
+    }
+    CATCHALL;
+
+    return AF_SUCCESS;
+}
+
+af_err af_get_backend_count(unsigned* num_backends)
+{
+    *num_backends = 1;
+    return AF_SUCCESS;
+}
+
+af_err af_get_available_backends(int* result)
+{
+    try {
+        *result = getBackend();
+    } CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err af_get_backend_id(af_backend *result, const af_array in)
+{
+    try {
+        ARG_ASSERT(1, in != 0);
+        ArrayInfo info = getInfo(in, false, false);
+        *result = info.getBackendId();
+    } CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err af_get_device_id(int *device, const af_array in)
+{
+    try {
+        ARG_ASSERT(1, in != 0);
+        ArrayInfo info = getInfo(in, false, false);
+        *device = info.getDevId();
+    } CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err af_get_active_backend(af_backend *result)
+{
+    *result = (af_backend)getBackend();
+    return AF_SUCCESS;
+}
 
 af_err af_init()
 {
     try {
         static bool first = true;
         if(first) {
-            getInfo();
+            getDeviceInfo();
             first = false;
         }
     } CATCHALL;
@@ -33,15 +85,23 @@ af_err af_init()
 
 af_err af_info()
 {
-    printf("%s", getInfo().c_str());
+    try {
+        printf("%s", getDeviceInfo().c_str());
+    } CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_get_version(int *major, int *minor, int *patch)
+af_err af_info_string(char **str, const bool verbose)
 {
-    *major = AF_VERSION_MAJOR;
-    *minor = AF_VERSION_MINOR;
-    *patch = AF_VERSION_PATCH;
+    try {
+        std::string infoStr = getDeviceInfo();
+        af_alloc_host((void**)str, sizeof(char) * (infoStr.size() + 1));
+
+        // Need to do a deep copy
+        // str.c_str wont cut it
+        infoStr.copy(*str, infoStr.size());
+        (*str)[infoStr.size()] = '\0';
+    } CATCHALL;
 
     return AF_SUCCESS;
 }
@@ -98,198 +158,127 @@ af_err af_sync(const int device)
     return AF_SUCCESS;
 }
 
-af_err af_device_array(af_array *arr, const void *data,
-                       const unsigned ndims,
-                       const dim_t * const dims,
-                       const af_dtype type)
+
+template<typename T>
+static inline void eval(af_array arr)
+{
+    getArray<T>(arr).eval();
+    return;
+}
+
+template<typename T>
+static inline void sparseEval(af_array arr)
+{
+    getSparseArray<T>(arr).eval();
+    return;
+}
+
+af_err af_eval(af_array arr)
 {
     try {
-        AF_CHECK(af_init());
+        ArrayInfo info = getInfo(arr, false);
+        af_dtype type = info.getType();
 
-        af_array res;
-        af::dim4 d((size_t)dims[0]);
-        for(unsigned i = 1; i < ndims; i++) {
-            d[i] = dims[i];
+        if(info.isSparse()) {
+            switch(type) {
+                case f32: sparseEval<float  >(arr); break;
+                case f64: sparseEval<double >(arr); break;
+                case c32: sparseEval<cfloat >(arr); break;
+                case c64: sparseEval<cdouble>(arr); break;
+                default : TYPE_ERROR(0, type);
+            }
+        } else {
+            switch (type) {
+                case f32: eval<float  >(arr); break;
+                case f64: eval<double >(arr); break;
+                case c32: eval<cfloat >(arr); break;
+                case c64: eval<cdouble>(arr); break;
+                case s32: eval<int    >(arr); break;
+                case u32: eval<uint   >(arr); break;
+                case u8 : eval<uchar  >(arr); break;
+                case b8 : eval<char   >(arr); break;
+                case s64: eval<intl   >(arr); break;
+                case u64: eval<uintl  >(arr); break;
+                case s16: eval<short  >(arr); break;
+                case u16: eval<ushort >(arr); break;
+                default: TYPE_ERROR(0, type);
+            }
+        }
+    } CATCHALL;
+
+    return AF_SUCCESS;
+}
+
+template<typename T>
+static inline void evalMultiple(int num, af_array *arrayPtrs)
+{
+    Array<T> empty = createEmptyArray<T>(dim4());
+    std::vector<Array<T>*> arrays(num, &empty);
+
+    for (int i = 0; i < num; i++) {
+        arrays[i] = reinterpret_cast<Array<T>*>(arrayPtrs[i]);
+    }
+
+    evalMultiple<T>(arrays);
+    return;
+}
+
+af_err af_eval_multiple(int num, af_array *arrays)
+{
+    try {
+        ArrayInfo info = getInfo(arrays[0]);
+        af_dtype type = info.getType();
+        dim4 dims = info.dims();
+
+        for (int i = 1; i < num; i++) {
+            ArrayInfo currInfo = getInfo(arrays[i]);
+
+            // FIXME: This needs to be removed when new functionality is added
+            if (type != currInfo.getType()) {
+                AF_ERROR("All arrays must be of same type", AF_ERR_TYPE);
+            }
+
+            if (dims != currInfo.dims()) {
+                AF_ERROR("All arrays must be of same size", AF_ERR_SIZE);
+            }
         }
 
         switch (type) {
-        case f32: res = getHandle(createDeviceDataArray<float  >(d, data)); break;
-        case f64: res = getHandle(createDeviceDataArray<double >(d, data)); break;
-        case c32: res = getHandle(createDeviceDataArray<cfloat >(d, data)); break;
-        case c64: res = getHandle(createDeviceDataArray<cdouble>(d, data)); break;
-        case s32: res = getHandle(createDeviceDataArray<int    >(d, data)); break;
-        case u32: res = getHandle(createDeviceDataArray<uint   >(d, data)); break;
-        case s64: res = getHandle(createDeviceDataArray<intl   >(d, data)); break;
-        case u64: res = getHandle(createDeviceDataArray<uintl  >(d, data)); break;
-        case u8 : res = getHandle(createDeviceDataArray<uchar  >(d, data)); break;
-        case b8 : res = getHandle(createDeviceDataArray<char   >(d, data)); break;
-        default: TYPE_ERROR(4, type);
+        case f32: evalMultiple<float  >(num, arrays); break;
+        case f64: evalMultiple<double >(num, arrays); break;
+        case c32: evalMultiple<cfloat >(num, arrays); break;
+        case c64: evalMultiple<cdouble>(num, arrays); break;
+        case s32: evalMultiple<int    >(num, arrays); break;
+        case u32: evalMultiple<uint   >(num, arrays); break;
+        case u8 : evalMultiple<uchar  >(num, arrays); break;
+        case b8 : evalMultiple<char   >(num, arrays); break;
+        case s64: evalMultiple<intl   >(num, arrays); break;
+        case u64: evalMultiple<uintl  >(num, arrays); break;
+        case s16: evalMultiple<short  >(num, arrays); break;
+        case u16: evalMultiple<ushort >(num, arrays); break;
+        default:
+            TYPE_ERROR(0, type);
         }
-
-        std::swap(*arr, res);
     } CATCHALL;
 
     return AF_SUCCESS;
 }
 
-af_err af_get_device_ptr(void **data, const af_array arr)
+af_err af_set_manual_eval_flag(bool flag)
 {
     try {
-
-        // Make sure all kernels and memcopies are done before getting device pointer
-        detail::sync(getActiveDeviceId());
-
-        af_dtype type = getInfo(arr).getType();
-
-        switch (type) {
-            //FIXME: Perform copy if memory not continuous
-        case f32: *data = getDevicePtr(getArray<float  >(arr)); break;
-        case f64: *data = getDevicePtr(getArray<double >(arr)); break;
-        case c32: *data = getDevicePtr(getArray<cfloat >(arr)); break;
-        case c64: *data = getDevicePtr(getArray<cdouble>(arr)); break;
-        case s32: *data = getDevicePtr(getArray<int    >(arr)); break;
-        case u32: *data = getDevicePtr(getArray<uint   >(arr)); break;
-        case s64: *data = getDevicePtr(getArray<intl   >(arr)); break;
-        case u64: *data = getDevicePtr(getArray<uintl  >(arr)); break;
-        case u8 : *data = getDevicePtr(getArray<uchar  >(arr)); break;
-        case b8 : *data = getDevicePtr(getArray<char   >(arr)); break;
-
-        default: TYPE_ERROR(4, type);
-        }
-
+        bool& backendFlag = evalFlag();
+        backendFlag = !flag;
     } CATCHALL;
-
     return AF_SUCCESS;
 }
 
-template <typename T>
-inline void lockDevicePtr(const af_array arr)
-{
-    memPop<T>((const T *)getArray<T>(arr).get());
-}
 
-af_err af_lock_device_ptr(const af_array arr)
+af_err af_get_manual_eval_flag(bool *flag)
 {
     try {
-
-        // Make sure all kernels and memcopies are done before getting device pointer
-        detail::sync(getActiveDeviceId());
-
-        af_dtype type = getInfo(arr).getType();
-
-        switch (type) {
-        case f32: lockDevicePtr<float  >(arr); break;
-        case f64: lockDevicePtr<double >(arr); break;
-        case c32: lockDevicePtr<cfloat >(arr); break;
-        case c64: lockDevicePtr<cdouble>(arr); break;
-        case s32: lockDevicePtr<int    >(arr); break;
-        case u32: lockDevicePtr<uint   >(arr); break;
-        case s64: lockDevicePtr<intl   >(arr); break;
-        case u64: lockDevicePtr<uintl  >(arr); break;
-        case u8 : lockDevicePtr<uchar  >(arr); break;
-        case b8 : lockDevicePtr<char   >(arr); break;
-        default: TYPE_ERROR(4, type);
-        }
-
+        bool backendFlag = evalFlag();
+        *flag = !backendFlag;
     } CATCHALL;
-
-    return AF_SUCCESS;
-}
-
-template <typename T>
-inline void unlockDevicePtr(const af_array arr)
-{
-    memPush<T>((const T *)getArray<T>(arr).get());
-}
-
-af_err af_unlock_device_ptr(const af_array arr)
-{
-    try {
-
-        // Make sure all kernels and memcopies are done before getting device pointer
-        detail::sync(getActiveDeviceId());
-
-        af_dtype type = getInfo(arr).getType();
-
-        switch (type) {
-        case f32: unlockDevicePtr<float  >(arr); break;
-        case f64: unlockDevicePtr<double >(arr); break;
-        case c32: unlockDevicePtr<cfloat >(arr); break;
-        case c64: unlockDevicePtr<cdouble>(arr); break;
-        case s32: unlockDevicePtr<int    >(arr); break;
-        case u32: unlockDevicePtr<uint   >(arr); break;
-        case s64: unlockDevicePtr<intl   >(arr); break;
-        case u64: unlockDevicePtr<uintl  >(arr); break;
-        case u8 : unlockDevicePtr<uchar  >(arr); break;
-        case b8 : unlockDevicePtr<char   >(arr); break;
-        default: TYPE_ERROR(4, type);
-        }
-
-    } CATCHALL;
-
-    return AF_SUCCESS;
-}
-
-
-af_err af_alloc_device(void **ptr, const dim_t bytes)
-{
-    try {
-        AF_CHECK(af_init());
-        *ptr = (void *)memAlloc<char>(bytes);
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_alloc_pinned(void **ptr, const dim_t bytes)
-{
-    try {
-        AF_CHECK(af_init());
-        *ptr = (void *)pinnedAlloc<char>(bytes);
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_free_device(void *ptr)
-{
-    try {
-        memFree<char>((char *)ptr);
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_free_pinned(void *ptr)
-{
-    try {
-        pinnedFree<char>((char *)ptr);
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_device_gc()
-{
-    try {
-        garbageCollect();
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_device_mem_info(size_t *alloc_bytes, size_t *alloc_buffers,
-                          size_t *lock_bytes,  size_t *lock_buffers)
-{
-    try {
-        deviceMemoryInfo(alloc_bytes, alloc_buffers, lock_bytes, lock_buffers);
-    } CATCHALL;
-    return AF_SUCCESS;
-}
-
-af_err af_set_mem_step_size(const size_t step_bytes)
-{
-    detail::setMemStepSize(step_bytes);
-    return AF_SUCCESS;
-}
-
-af_err af_get_mem_step_size(size_t *step_bytes)
-{
-    *step_bytes =  detail::getMemStepSize();
     return AF_SUCCESS;
 }

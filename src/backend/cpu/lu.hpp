@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
 #include <Array.hpp>
 
 namespace cpu
@@ -17,4 +16,6 @@ namespace cpu
 
     template<typename T>
     Array<int> lu_inplace(Array<T> &in, const bool convert_pivot = true);
+
+    bool isLAPACKAvailable();
 }

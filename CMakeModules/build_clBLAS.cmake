@@ -1,6 +1,6 @@
 INCLUDE(ExternalProject)
 
-SET(prefix ${CMAKE_BINARY_DIR}/third_party/clBLAS)
+SET(prefix ${PROJECT_BINARY_DIR}/third_party/clBLAS)
 SET(clBLAS_location ${prefix}/lib/import/${CMAKE_STATIC_LIBRARY_PREFIX}clBLAS${CMAKE_STATIC_LIBRARY_SUFFIX})
 IF(CMAKE_VERSION VERSION_LESS 3.2)
     IF(CMAKE_GENERATOR MATCHES "Ninja")
@@ -12,9 +12,9 @@ ELSE()
 ENDIF()
 
 ExternalProject_Add(
-    clBLAS-external
+    clBLAS-ext
     GIT_REPOSITORY https://github.com/arrayfire/clBLAS.git
-    GIT_TAG 47662a6ac1186c756508109d7fef8827efab4504
+    GIT_TAG arrayfire-release
     PREFIX "${prefix}"
     INSTALL_DIR "${prefix}"
     UPDATE_COMMAND ""
@@ -33,10 +33,10 @@ ExternalProject_Add(
     ${byproducts}
     )
 
-ExternalProject_Get_Property(clBLAS-external install_dir)
+ExternalProject_Get_Property(clBLAS-ext install_dir)
 ADD_LIBRARY(clBLAS IMPORTED STATIC)
 SET_TARGET_PROPERTIES(clBLAS PROPERTIES IMPORTED_LOCATION ${clBLAS_location})
-ADD_DEPENDENCIES(clBLAS clBLAS-external)
+ADD_DEPENDENCIES(clBLAS clBLAS-ext)
 SET(CLBLAS_INCLUDE_DIRS ${install_dir}/include)
 SET(CLBLAS_LIBRARIES clBLAS)
 SET(CLBLAS_FOUND ON)

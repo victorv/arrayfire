@@ -13,11 +13,10 @@
 #include <err_common.hpp>
 #include <backend.hpp>
 #include <arith.hpp>
-#include <fft.hpp>
 #include <fftconvolve.hpp>
-#include <convolve_common.hpp>
 #include <dispatch.hpp>
 #include <complex.hpp>
+#include <fft_common.hpp>
 
 using af::dim4;
 using namespace detail;
@@ -67,16 +66,16 @@ af_array fftconvolve_fallback(const af_array signal, const af_array filter, bool
     }
 
     // fft(signal)
-    Array<cT> T1 = fft<cT, cT, baseDim, false>(S, 1.0, baseDim, psdims.get());
+    Array<cT> T1 = fft<cT, cT, baseDim, true>(S, 1.0, baseDim, psdims.get());
 
     // fft(filter)
-    Array<cT> T2 = fft<cT, cT, baseDim, false>(F, 1.0, baseDim, pfdims.get());
+    Array<cT> T2 = fft<cT, cT, baseDim, true>(F, 1.0, baseDim, pfdims.get());
 
     // fft(signal) * fft(filter)
     T1 = arithOp<cT, af_mul_t>(T1, T2, odims);
 
     // ifft(ffit(signal) * fft(filter))
-    T1 = ifft<cT, baseDim>(T1, 1.0/(double)count, baseDim, odims.get());
+    T1 = fft<cT, cT, baseDim, false>(T1, 1.0/(double)count, baseDim, odims.get());
 
     // Index to proper offsets
     T1 = createSubArray<cT>(T1, index);
@@ -89,36 +88,36 @@ af_array fftconvolve_fallback(const af_array signal, const af_array filter, bool
 }
 
 template<typename T, typename convT, typename cT, bool isDouble, bool roundOut, dim_t baseDim>
-inline static af_array fftconvolve(const af_array &s, const af_array &f, const bool expand, ConvolveBatchKind kind)
+inline static af_array fftconvolve(const af_array &s, const af_array &f, const bool expand, AF_BATCH_KIND kind)
 {
-    if (kind == CONVOLVE_BATCH_DIFF) return fftconvolve_fallback<T, convT, cT, baseDim>(s, f, expand);
+    if (kind == AF_BATCH_DIFF) return fftconvolve_fallback<T, convT, cT, baseDim>(s, f, expand);
     else return getHandle(fftconvolve<T, convT, cT, isDouble, roundOut, baseDim>(getArray<T>(s), castArray<T>(f), expand, kind));
 }
 
 template<dim_t baseDim>
-ConvolveBatchKind identifyBatchKind(const dim4 &sDims, const dim4 &fDims)
+AF_BATCH_KIND identifyBatchKind(const dim4 &sDims, const dim4 &fDims)
 {
     dim_t sn = sDims.ndims();
     dim_t fn = fDims.ndims();
 
     if (sn==baseDim && fn==baseDim)
-        return CONVOLVE_BATCH_NONE;
+        return AF_BATCH_NONE;
     else if (sn==baseDim && (fn>baseDim && fn<=4))
-        return CONVOLVE_BATCH_KERNEL;
+        return AF_BATCH_RHS;
     else if ((sn>baseDim && sn<=4) && fn==baseDim)
-        return CONVOLVE_BATCH_SIGNAL;
+        return AF_BATCH_LHS;
     else if ((sn>baseDim && sn<=4) && (fn>baseDim && fn<=4)) {
        bool doesDimensionsMatch = true;
         bool isInterleaved = true;
         for (dim_t i=baseDim; i<4; i++) {
             doesDimensionsMatch &= (sDims[i] == fDims[i]);
-            isInterleaved &= (sDims[i] == 1 || fDims[i] == 1);
+            isInterleaved &= (sDims[i] == 1 || fDims[i] == 1 || sDims[i] == fDims[i]);
         }
-        if (doesDimensionsMatch) return CONVOLVE_BATCH_SAME;
-        return (isInterleaved ? CONVOLVE_BATCH_DIFF : CONVOLVE_BATCH_UNSUPPORTED);
+        if (doesDimensionsMatch) return AF_BATCH_SAME;
+        return (isInterleaved ? AF_BATCH_DIFF : AF_BATCH_UNSUPPORTED);
     }
     else
-        return CONVOLVE_BATCH_UNSUPPORTED;
+        return AF_BATCH_UNSUPPORTED;
 }
 
 template<dim_t baseDim>
@@ -133,9 +132,9 @@ af_err fft_convolve(af_array *out, const af_array signal, const af_array filter,
         dim4 sdims = sInfo.dims();
         dim4 fdims = fInfo.dims();
 
-        ConvolveBatchKind convBT = identifyBatchKind<baseDim>(sdims, fdims);
+        AF_BATCH_KIND convBT = identifyBatchKind<baseDim>(sdims, fdims);
 
-        ARG_ASSERT(1, (convBT != CONVOLVE_BATCH_UNSUPPORTED));
+        ARG_ASSERT(1, (convBT != AF_BATCH_UNSUPPORTED));
 
         af_array output;
         switch(stype) {
@@ -143,6 +142,10 @@ af_err fft_convolve(af_array *out, const af_array signal, const af_array filter,
             case f32: output = fftconvolve<float , float,  cfloat,  false, false, baseDim>(signal, filter, expand, convBT); break;
             case u32: output = fftconvolve<uint  , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
             case s32: output = fftconvolve<int   , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
+            case u64: output = fftconvolve<uintl , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
+            case s64: output = fftconvolve<intl  , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
+            case u16: output = fftconvolve<ushort, float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
+            case s16: output = fftconvolve<short , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
             case u8:  output = fftconvolve<uchar , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
             case b8:  output = fftconvolve<char  , float,  cfloat,  false, true,  baseDim>(signal, filter, expand, convBT); break;
             case c32: output = fftconvolve_fallback<cfloat , cfloat , cfloat , baseDim>(signal, filter, expand); break;
@@ -163,10 +166,18 @@ af_err af_fft_convolve1(af_array *out, const af_array signal, const af_array fil
 
 af_err af_fft_convolve2(af_array *out, const af_array signal, const af_array filter, const af_conv_mode mode)
 {
-    return fft_convolve<2>(out, signal, filter, mode == AF_CONV_EXPAND);
+    if (getInfo(signal).dims().ndims()<2 && getInfo(filter).dims().ndims()<2) {
+        return fft_convolve<1>(out, signal, filter, mode == AF_CONV_EXPAND);
+    } else {
+        return fft_convolve<2>(out, signal, filter, mode == AF_CONV_EXPAND);
+    }
 }
 
 af_err af_fft_convolve3(af_array *out, const af_array signal, const af_array filter, const af_conv_mode mode)
 {
-    return fft_convolve<3>(out, signal, filter, mode == AF_CONV_EXPAND);
+    if (getInfo(signal).dims().ndims()<3 && getInfo(filter).dims().ndims()<3) {
+        return fft_convolve<2>(out, signal, filter, mode == AF_CONV_EXPAND);
+    } else {
+        return fft_convolve<3>(out, signal, filter, mode == AF_CONV_EXPAND);
+    }
 }
