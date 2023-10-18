@@ -6,54 +6,51 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-
-#include <af/dim4.hpp>
-#include <Array.hpp>
-#include <triangle.hpp>
 #include <kernel/triangle.hpp>
+#include <triangle.hpp>
+
+#include <Array.hpp>
+#include <common/half.hpp>
+#include <af/dim4.hpp>
 
 using af::dim4;
+using arrayfire::common::half;
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
 
-template<typename T, bool is_upper, bool is_unit_diag>
-void triangle(Array<T> &out, const Array<T> &in)
-{
-    kernel::triangle<T, is_upper, is_unit_diag>(out, in);
+template<typename T>
+void triangle(Array<T> &out, const Array<T> &in, const bool is_upper,
+              const bool is_unit_diag) {
+    kernel::triangle<T>(out, in, is_upper, is_unit_diag);
 }
 
-
-template<typename T, bool is_upper, bool is_unit_diag>
-Array<T> triangle(const Array<T> &in)
-{
+template<typename T>
+Array<T> triangle(const Array<T> &in, const bool is_upper,
+                  const bool is_unit_diag) {
     Array<T> out = createEmptyArray<T>(in.dims());
-    triangle<T, is_upper, is_unit_diag>(out, in);
+    triangle<T>(out, in, is_upper, is_unit_diag);
     return out;
 }
 
-
 #define INSTANTIATE(T)                                                  \
-    template void triangle<T, true ,  true>(Array<T> &out, const Array<T> &in); \
-    template void triangle<T, false,  true>(Array<T> &out, const Array<T> &in); \
-    template void triangle<T, true , false>(Array<T> &out, const Array<T> &in); \
-    template void triangle<T, false, false>(Array<T> &out, const Array<T> &in); \
-    template Array<T> triangle<T, true ,  true>(const Array<T> &in);    \
-    template Array<T> triangle<T, false,  true>(const Array<T> &in);    \
-    template Array<T> triangle<T, true , false>(const Array<T> &in);    \
-    template Array<T> triangle<T, false, false>(const Array<T> &in);    \
+    template void triangle<T>(Array<T> &, const Array<T> &, const bool, \
+                              const bool);                              \
+    template Array<T> triangle<T>(const Array<T> &, const bool, const bool);
 
-    INSTANTIATE(float)
-    INSTANTIATE(double)
-    INSTANTIATE(cfloat)
-    INSTANTIATE(cdouble)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(intl)
-    INSTANTIATE(uintl)
-    INSTANTIATE(char)
-    INSTANTIATE(uchar)
-    INSTANTIATE(short)
-    INSTANTIATE(ushort)
+INSTANTIATE(float)
+INSTANTIATE(double)
+INSTANTIATE(cfloat)
+INSTANTIATE(cdouble)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+INSTANTIATE(char)
+INSTANTIATE(uchar)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+INSTANTIATE(half)
 
-}
+}  // namespace opencl
+}  // namespace arrayfire

@@ -7,273 +7,477 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/dim4.hpp>
 #include <Array.hpp>
-#include <map>
-#include <vector>
-#include <stdexcept>
+#include <common/compile_module.hpp>
+#include <common/deterministicHash.hpp>
+#include <common/jit/ModdimNode.hpp>
+#include <common/jit/Node.hpp>
+#include <common/jit/NodeIterator.hpp>
+#include <common/kernel_cache.hpp>
+#include <common/util.hpp>
 #include <copy.hpp>
-#include <JIT/Node.hpp>
-#include <kernel_headers/jit.hpp>
-#include <program.hpp>
-#include <cache.hpp>
-#include <dispatch.hpp>
+#include <device_manager.hpp>
 #include <err_opencl.hpp>
-#include <functional>
+#include <jit/BufferNode.hpp>
+#include <jit/ShiftNode.hpp>
+#include <kernel_headers/jit.hpp>
+#include <threadsMgt.hpp>
+#include <type_util.hpp>
+#include <af/dim4.hpp>
 #include <af/opencl.h>
 
-namespace opencl
-{
+#include <algorithm>
+#include <cstdio>
+#include <functional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-using JIT::Node;
+using arrayfire::common::findModule;
+using arrayfire::common::getFuncName;
+using arrayfire::common::ModdimNode;
+using arrayfire::common::Node;
+using arrayfire::common::Node_ids;
+using arrayfire::common::Node_map_t;
+using arrayfire::common::Node_ptr;
+using arrayfire::common::NodeIterator;
+using arrayfire::common::saveKernel;
+using arrayfire::opencl::jit::ShiftNode;
 
-using cl::Buffer;
-using cl::Program;
 using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
 using cl::NDRange;
+using cl::NullRange;
+
+using std::equal;
+using std::find_if;
+using std::for_each;
+using std::shared_ptr;
 using std::string;
 using std::stringstream;
+using std::to_string;
+using std::vector;
 
-static string getFuncName(std::vector<Node *> nodes, bool is_linear, bool *is_double)
-{
-    stringstream hashName;
-    stringstream funcName;
+namespace arrayfire {
+namespace opencl {
+using jit::BufferNode;
 
-    if (is_linear) {
-        funcName << "L_";
-    } else {
-        funcName << "G_";
-    }
-
-    int id = 0;
-    for (auto node :  nodes) {
-        funcName << "[";
-        id = node->setId(id);
-        funcName << node->getNameStr();
-        node->genKerName(funcName);
-        funcName << "]";
-    }
-
-    string nameStr = funcName.str();
-    string dblChars = "dDzZ";
-    size_t loc = nameStr.find_first_of(dblChars);
-    *is_double = (loc != std::string::npos);
-
-    std::hash<std::string> hash_fn;
-    hashName << "KER" << hash_fn(funcName.str());
-    return hashName.str();
-}
-
-static string getKernelString(string funcName, std::vector<Node *> nodes, bool is_linear)
-{
-
+string getKernelString(const string& funcName, const vector<Node*>& full_nodes,
+                       const vector<Node_ids>& full_ids,
+                       const vector<int>& output_ids, const bool is_linear,
+                       const bool loop0, const bool loop1, const bool loop3) {
     // Common OpenCL code
     // This part of the code does not change with the kernel.
 
-    static const char *kernelVoid =  "__kernel void\n";
-    static const char *dimParams = "KParam oInfo, uint groups_0, uint groups_1, uint num_odims";
-    static const char *blockStart = "{\n\n";
-    static const char *blockEnd = "\n\n}";
+    static const char* kernelVoid = R"JIT(
+__kernel void )JIT";
+    static const char* dimParams  = "KParam oInfo";
+    static const char* blockStart = "{";
+    static const char* blockEnd   = "\n}\n";
 
-    static const char *linearIndex = "\n"
-        "uint groupId  = get_group_id(1) * get_num_groups(0) + get_group_id(0);\n"
-        "uint threadId = get_local_id(0);\n"
-        "int idx = groupId * get_local_size(0) * get_local_size(1) + threadId;\n"
-        "if (idx >= oInfo.dims[3] * oInfo.strides[3]) return;\n";
+    static const char* linearInit = R"JIT(
+   int idx = get_global_id(0);
+   const int idxEnd = oInfo.dims[0];
+   if (idx < idxEnd) {
+)JIT";
+    static const char* linearEnd  = R"JIT(
+   })JIT";
 
-    static const char *generalIndex = "\n"
-        "uint id0 = 0, id1 = 0, id2 = 0, id3 = 0;\n"
-        "if (num_odims > 2) {\n"
-        "id2 = get_group_id(0) / groups_0;\n"
-        "id0 = get_group_id(0) - id2 * groups_0;\n"
-        "id0 = get_local_id(0) + id0 * get_local_size(0);\n"
-        "if (num_odims > 3) {\n"
-        "id3 = get_group_id(1) / groups_1;\n"
-        "id1 = get_group_id(1) - id3 * groups_1;\n"
-        "id1 = get_local_id(1) + id1 * get_local_size(1);\n"
-        "} else {\n"
-        "id1 = get_global_id(1);\n"
-        "}\n"
-        " } else {\n"
-        "id3 = 0;\n"
-        "id2 = 0;\n"
-        "id1 = get_global_id(1);\n"
-        "id0 = get_global_id(0);\n"
-        "}\n"
-        "bool cond = \n"
-        "id0 < oInfo.dims[0] && \n"
-        "id1 < oInfo.dims[1] && \n"
-        "id2 < oInfo.dims[2] && \n"
-        "id3 < oInfo.dims[3];\n\n"
-        "if (!cond) return;\n\n"
-        "int idx = "
-        "oInfo.strides[3] * id3 + oInfo.strides[2] * id2 + "
-        "oInfo.strides[1] * id1 + id0 + oInfo.offset;\n\n";
+    static const char* linearLoop0Start = R"JIT(
+        const int idxID0Inc = get_global_size(0);
+        do {)JIT";
+    static const char* linearLoop0End   = R"JIT(
+            idx += idxID0Inc;
+            if (idx >= idxEnd) break;
+        } while (true);)JIT";
 
+    // ///////////////////////////////////////////////
+    // oInfo = output optimized information (dims, strides, offset).
+    //         oInfo has removed dimensions, to optimized block scheduling
+    // iInfo = input internal information (dims, strides, offset)
+    //         iInfo has the original dimensions, auto generated code
+    //
+    // Loop3 is fastest and becomes inside loop, since
+    //      - #of loops is known upfront
+    // Loop1 is used for extra dynamic looping (writing into cache)
+    // All loops are conditional and idependent
+    // Format Loop1 & Loop3
+    // ////////////////////////////
+    //  *stridedLoopNInit               // Always
+    //  *stridedLoop1Init               // Conditional
+    //  *stridedLoop2Init               // Conditional
+    //  *stridedLoop3Init               // Conditional
+    //  *stridedLoop1Start              // Conditional
+    //      *stridedLoop3Start          // Conditional
+    //          auto generated code     // Always
+    //      *stridedLoop3End            // Conditional
+    //  *stridedLoop1End                // Conditional
+    //  *StridedEnd                     // Always
+    //
+    // format loop0 (Vector only)
+    // //////////////////////////
+    // *stridedLoop0Init                // Always
+    // *stridedLoop0Start               // Always
+    //      auto generated code         // Always
+    // *stridedLoop0End                 // Always
+    // *stridedEnd                      // Always
 
-    stringstream inParamStream;
-    stringstream outParamStream;
-    stringstream outWriteStream;
-    stringstream offsetsStream;
-    stringstream opsStream;
+    static const char* stridedLoop0Init  = R"JIT(
+    int id0 = get_global_id(0);
+    const int id0End = oInfo.dims[0];
+    if (id0 < id0End) {
+#define id1 0
+#define id2 0
+#define id3 0
+        const int ostrides0 = oInfo.strides[0];
+        int idx = ostrides0*id0;)JIT";
+    static const char* stridedLoop0Start = R"JIT(
+        const int id0Inc = get_global_size(0);
+        const int idxID0Inc = ostrides0*id0Inc;
+        do {)JIT";
+    static const char* stridedLoop0End   = R"JIT(
+            id0 += id0Inc;
+            if (id0 >= id0End) break;
+            idx += idxID0Inc;
+        } while (true);)JIT";
 
-    int count  = 0;
+    // -------------
+    static const char* stridedLoopNInit = R"JIT(
+    int id0 = get_global_id(0);
+    int id1 = get_global_id(1);
+    const int id0End = oInfo.dims[0];
+    const int id1End = oInfo.dims[1];
+    if ((id0 < id0End) & (id1 < id1End)) {
+        const int id2 = get_global_id(2);
+#define id3 0
+        const int ostrides1 = oInfo.strides[1];
+        int idx = (int)oInfo.strides[0]*id0 + ostrides1*id1 + (int)oInfo.strides[2]*id2;)JIT";
+    static const char* stridedEnd       = R"JIT(
+    })JIT";
 
-    for (auto node : nodes) {
-        int id = node->getId();
-        node->genParams(inParamStream, is_linear);
-        outParamStream << "__global " << node->getTypeStr() << " *out" << id << ", \n";
-        outWriteStream << "out" << id << "[idx] = " << "val" << id << ";\n";
-        node->genOffsets(offsetsStream, is_linear);
-        node->genFuncs(opsStream);
-        opsStream << "//" << ++count << std::endl << std::endl;
+    static const char* stridedLoop3Init  = R"JIT(
+#undef id3
+        int id3 = 0;
+        const int id3End = oInfo.dims[3];
+        const int idxID3Inc = oInfo.strides[3];)JIT";
+    static const char* stridedLoop3Start = R"JIT(
+                const int idxBaseID3 = idx;
+                do {)JIT";
+    static const char* stridedLoop3End   = R"JIT(
+                    ++id3;
+                    if (id3 == id3End) break;
+                    idx += idxID3Inc;
+                } while (true);
+                id3 = 0;
+                idx = idxBaseID3;)JIT";
+
+    static const char* stridedLoop1Init  = R"JIT(
+        const int id1Inc = get_global_size(1);
+        const int idxID1Inc = id1Inc * ostrides1;)JIT";
+    static const char* stridedLoop1Start = R"JIT(
+        do {)JIT";
+    static const char* stridedLoop1End   = R"JIT(
+            id1 += id1Inc;
+            if (id1 >= id1End) break;
+            idx += idxID1Inc;
+        } while (true);)JIT";
+
+    // Reuse stringstreams, because they are very costly during initilization
+    thread_local stringstream inParamStream;
+    thread_local stringstream outParamStream;
+    thread_local stringstream outOffsetStream;
+    thread_local stringstream inOffsetsStream;
+    thread_local stringstream opsStream;
+
+    int oid{0};
+    for (size_t i{0}; i < full_nodes.size(); i++) {
+        const auto& node{full_nodes[i]};
+        const auto& ids_curr{full_ids[i]};
+        // Generate input parameters, only needs current id
+        node->genParams(inParamStream, ids_curr.id, is_linear);
+        // Generate input offsets, only needs current id
+        node->genOffsets(inOffsetsStream, ids_curr.id, is_linear);
+        // Generate the core function body, needs children ids as well
+        node->genFuncs(opsStream, ids_curr);
+        for (auto outIt{begin(output_ids)}, endIt{end(output_ids)};
+             (outIt = find(outIt, endIt, ids_curr.id)) != endIt; ++outIt) {
+            // Generate also output parameters
+            outParamStream << "__global "
+                           << full_nodes[ids_curr.id]->getTypeStr() << " *out"
+                           << oid << ", int offset" << oid << ",\n";
+            // Apply output offset
+            outOffsetStream << "\nout" << oid << " += offset" << oid << ';';
+            // Generate code to write the output
+            opsStream << "out" << oid << "[idx] = val" << ids_curr.id << ";\n";
+            ++oid;
+        }
     }
 
-    // Put various blocks into a single stream
-    stringstream kerStream;
-    kerStream << kernelVoid;
-    kerStream << funcName;
-    kerStream << "(\n";
-    kerStream << inParamStream.str();
-    kerStream << outParamStream.str();
-    kerStream << dimParams;
-    kerStream << ")\n";
-    kerStream << blockStart;
+    thread_local stringstream kerStream;
+    kerStream << kernelVoid << funcName << "(\n"
+              << inParamStream.str() << outParamStream.str() << dimParams << ")"
+              << blockStart;
     if (is_linear) {
-        kerStream << linearIndex;
+        kerStream << linearInit << inOffsetsStream.str()
+                  << outOffsetStream.str() << '\n';
+        if (loop0) kerStream << linearLoop0Start;
+        kerStream << "\n\n" << opsStream.str();
+        if (loop0) kerStream << linearLoop0End;
+        kerStream << linearEnd;
     } else {
-        kerStream << generalIndex;
-    }
-    kerStream << offsetsStream.str();
-    kerStream << opsStream.str();
-    kerStream << outWriteStream.str();
-    kerStream << blockEnd;
-
-    return kerStream.str();
-}
-
-static Kernel getKernel(std::vector<Node *> nodes, bool is_linear)
-{
-
-    bool is_dbl = false;
-    string funcName = getFuncName(nodes, is_linear, &is_dbl);
-    int device = getActiveDeviceId();
-
-    kc_t::iterator idx = kernelCaches[device].find(funcName);
-    kc_entry_t entry;
-
-    if (idx == kernelCaches[device].end()) {
-        string jit_ker = getKernelString(funcName, nodes, is_linear);
-
-        const char *ker_strs[] = {jit_cl, jit_ker.c_str()};
-        const int ker_lens[] = {jit_cl_len, (int)jit_ker.size()};
-        cl::Program prog;
-        buildProgram(prog, 2, ker_strs, ker_lens, is_dbl ? string(" -D USE_DOUBLE") :  string(""));
-        entry.prog = new cl::Program(prog);
-        entry.ker = new Kernel(*entry.prog, funcName.c_str());
-
-        kernelCaches[device][funcName] = entry;
-    } else {
-        entry = idx->second;
-    }
-
-    return *entry.ker;
-}
-
-void evalNodes(std::vector<Param> &outputs, std::vector<Node *> nodes)
-{
-    try {
-
-        if (outputs.size() == 0) return;
-
-        // Assume all ouputs are of same size
-        //FIXME: Add assert to check if all outputs are same size?
-        KParam out_info = outputs[0].info;
-
-        // Verify if all ASTs hold Linear Arrays
-        bool is_linear = true;
-        for (auto node : nodes) {
-            is_linear &= node->isLinear(out_info.dims);
-        }
-
-        Kernel ker = getKernel(nodes, is_linear);
-
-        uint local_0 = 1;
-        uint local_1 = 1;
-        uint global_0 = 1;
-        uint global_1 = 1;
-        uint groups_0 = 1;
-        uint groups_1 = 1;
-        uint num_odims = 4;
-
-        // CPUs seem to perform better with work group size 1024
-        const int work_group_size = (getActiveDeviceType() == AFCL_DEVICE_TYPE_CPU) ? 1024 : 256;
-
-        while (num_odims >= 1) {
-            if (out_info.dims[num_odims - 1] == 1) num_odims--;
-            else break;
-        }
-
-        if (is_linear) {
-            local_0 = work_group_size;
-            uint out_elements = out_info.dims[3] * out_info.strides[3];
-            uint groups = divup(out_elements, local_0);
-
-            global_1 = divup(groups,     1000) * local_1;
-            global_0 = divup(groups, global_1) * local_0;
-
+        if (loop0) {
+            kerStream << stridedLoop0Init << outOffsetStream.str() << '\n'
+                      << stridedLoop0Start;
         } else {
-            local_1 =  4;
-            local_0 = work_group_size / local_1;
-
-            groups_0 = divup(out_info.dims[0], local_0);
-            groups_1 = divup(out_info.dims[1], local_1);
-
-            global_0 = groups_0 * local_0 * out_info.dims[2];
-            global_1 = groups_1 * local_1 * out_info.dims[3];
+            kerStream << stridedLoopNInit << outOffsetStream.str() << '\n';
+            if (loop3) kerStream << stridedLoop3Init;
+            if (loop1) kerStream << stridedLoop1Init << stridedLoop1Start;
+            if (loop3) kerStream << stridedLoop3Start;
         }
-
-        NDRange local(local_0, local_1);
-        NDRange global(global_0, global_1);
-
-        int args = 0;
-        for (auto node : nodes) {
-            args = node->setArgs(ker, args, is_linear);
-        }
-
-        // Set output parameters
-        for (auto output : outputs) {
-            ker.setArg(args, *(output.data));
-            ++args;
-        }
-
-        // Set dimensions
-        // All outputs are asserted to be of same size
-        // Just use the size from the first output
-        ker.setArg(args + 0,  out_info);
-        ker.setArg(args + 1,  groups_0);
-        ker.setArg(args + 2,  groups_1);
-        ker.setArg(args + 3,  num_odims);
-
-        getQueue().enqueueNDRangeKernel(ker, cl::NullRange, global, local);
-
-        for (auto node : nodes) {
-            node->resetFlags();
-        }
-
-    } catch (const cl::Error &ex) {
-        CL_TO_AF_ERROR(ex);
+        kerStream << "\n\n" << inOffsetsStream.str() << opsStream.str();
+        if (loop3) kerStream << stridedLoop3End;
+        if (loop1) kerStream << stridedLoop1End;
+        if (loop0) kerStream << stridedLoop0End;
+        kerStream << stridedEnd;
     }
+    kerStream << blockEnd;
+    const string ret{kerStream.str()};
 
+    // Prepare for next round, limit memory
+    inParamStream.str("");
+    outParamStream.str("");
+    inOffsetsStream.str("");
+    outOffsetStream.str("");
+    opsStream.str("");
+    kerStream.str("");
+
+    return ret;
 }
 
-void evalNodes(Param &out, Node *node)
-{
-    std::vector<Param>  outputs{out};
-    std::vector<Node *> nodes{node};
+cl::Kernel getKernel(const vector<Node*>& output_nodes,
+                     const vector<int>& output_ids,
+                     const vector<Node*>& full_nodes,
+                     const vector<Node_ids>& full_ids, const bool is_linear,
+                     const bool loop0, const bool loop1, const bool loop3) {
+    const string funcName{getFuncName(output_nodes, full_nodes, full_ids,
+                                      is_linear, loop0, loop1, false, loop3)};
+    // A forward lookup in module cache helps avoid recompiling the JIT
+    // source generated from identical JIT-trees.
+    const auto entry{
+        findModule(getActiveDeviceId(), deterministicHash(funcName))};
+
+    if (!entry) {
+        const string jitKer{getKernelString(funcName, full_nodes, full_ids,
+                                            output_ids, is_linear, loop0, loop1,
+                                            loop3)};
+        saveKernel(funcName, jitKer, ".cl");
+
+        const common::Source jitKer_cl_src{
+            jitKer.data(), jitKer.size(),
+            deterministicHash(jitKer.data(), jitKer.size())};
+        const cl::Device device{getDevice()};
+        vector<string> options;
+        if (isDoubleSupported(device)) {
+            options.emplace_back(DefineKey(USE_DOUBLE));
+        }
+        if (isHalfSupported(device)) {
+            options.emplace_back(DefineKey(USE_HALF));
+        }
+        return common::getKernel(funcName, {{jit_cl_src, jitKer_cl_src}}, {},
+                                 options, true)
+            .get();
+    }
+    return common::getKernel(entry, funcName, true).get();
+}
+
+void evalNodes(vector<Param>& outputs, const vector<Node*>& output_nodes) {
+    const unsigned nrOutputs{static_cast<unsigned>(outputs.size())};
+    if (nrOutputs == 0) { return; }
+    assert(outputs.size() == output_nodes.size());
+    KParam& out_info{outputs[0].info};
+    dim_t* outDims{out_info.dims};
+    dim_t* outStrides{out_info.strides};
+#ifndef NDEBUG
+    for_each(begin(outputs)++, end(outputs),
+             [outDims, outStrides](Param& output) {
+                 assert(equal(output.info.dims, output.info.dims + AF_MAX_DIMS,
+                              outDims) &&
+                        equal(output.info.strides,
+                              output.info.strides + AF_MAX_DIMS, outStrides));
+             });
+#endif
+
+    dim_t ndims{outDims[3] > 1   ? 4
+                : outDims[2] > 1 ? 3
+                : outDims[1] > 1 ? 2
+                : outDims[0] > 0 ? 1
+                                 : 0};
+    bool is_linear{true};
+    dim_t numOutElems{1};
+    for (dim_t dim{0}; dim < ndims; ++dim) {
+        is_linear &= (numOutElems == outStrides[dim]);
+        numOutElems *= outDims[dim];
+    }
+    if (numOutElems == 0) { return; }
+
+    // Use thread local to reuse the memory every time you are here.
+    thread_local Node_map_t nodes;
+    thread_local vector<Node*> full_nodes;
+    thread_local vector<Node_ids> full_ids;
+    thread_local vector<int> output_ids;
+
+    // Reserve some space to improve performance at smaller sizes
+    constexpr size_t CAP{1024};
+    if (full_nodes.capacity() < CAP) {
+        nodes.reserve(CAP);
+        output_ids.reserve(10);
+        full_nodes.reserve(CAP);
+        full_ids.reserve(CAP);
+    }
+
+    const af::dtype outputType{output_nodes[0]->getType()};
+    const size_t outputSizeofType{size_of(outputType)};
+    for (Node* node : output_nodes) {
+        assert(node->getType() == outputType);
+        const int id{node->getNodesMap(nodes, full_nodes, full_ids)};
+        output_ids.push_back(id);
+    }
+
+    const size_t outputSize{numOutElems * outputSizeofType * nrOutputs};
+    size_t inputSize{0};
+    unsigned nrInputs{0};
+    bool moddimsFound{false};
+    for (const Node* node : full_nodes) {
+        is_linear &= node->isLinear(outDims);
+        moddimsFound |= (node->getOp() == af_moddims_t);
+        if (node->isBuffer()) {
+            ++nrInputs;
+            inputSize += node->getBytes();
+        }
+    }
+    const size_t totalSize{inputSize + outputSize};
+
+    bool emptyColumnsFound{false};
+    if (is_linear) {
+        outDims[0]    = numOutElems;
+        outDims[1]    = 1;
+        outDims[2]    = 1;
+        outDims[3]    = 1;
+        outStrides[0] = 1;
+        outStrides[1] = numOutElems;
+        outStrides[2] = numOutElems;
+        outStrides[3] = numOutElems;
+        ndims         = 1;
+    } else {
+        emptyColumnsFound = ndims > (outDims[0] == 1   ? 1
+                                     : outDims[1] == 1 ? 2
+                                     : outDims[2] == 1 ? 3
+                                                       : 4);
+    }
+
+    // Keep in global scope, so that the nodes remain active for later referral
+    // in case moddims operations or column elimination have to take place
+    vector<Node_ptr> node_clones;
+    // Avoid all cloning/copying when no moddims node is present (high chance)
+    if (moddimsFound | emptyColumnsFound) {
+        node_clones.reserve(full_nodes.size());
+        for (Node* node : full_nodes) {
+            node_clones.emplace_back(node->clone());
+        }
+
+        for (const Node_ids& ids : full_ids) {
+            auto& children{node_clones[ids.id]->m_children};
+            for (int i{0}; i < Node::kMaxChildren && children[i] != nullptr;
+                 i++) {
+                children[i] = node_clones[ids.child_ids[i]];
+            }
+        }
+
+        if (moddimsFound) {
+            const auto isModdim{[](const Node_ptr& ptr) {
+                return ptr->getOp() == af_moddims_t;
+            }};
+            for (auto nodeIt{begin(node_clones)}, endIt{end(node_clones)};
+                 (nodeIt = find_if(nodeIt, endIt, isModdim)) != endIt;
+                 ++nodeIt) {
+                const ModdimNode* mn{static_cast<ModdimNode*>(nodeIt->get())};
+
+                const auto new_strides{calcStrides(mn->m_new_shape)};
+                const auto isBuffer{
+                    [](const Node& node) { return node.isBuffer(); }};
+                for (NodeIterator<> it{nodeIt->get()}, end{NodeIterator<>()};
+                     (it = find_if(it, end, isBuffer)) != end; ++it) {
+                    BufferNode* buf{static_cast<BufferNode*>(&(*it))};
+                    buf->m_param.dims[0]    = mn->m_new_shape[0];
+                    buf->m_param.dims[1]    = mn->m_new_shape[1];
+                    buf->m_param.dims[2]    = mn->m_new_shape[2];
+                    buf->m_param.dims[3]    = mn->m_new_shape[3];
+                    buf->m_param.strides[0] = new_strides[0];
+                    buf->m_param.strides[1] = new_strides[1];
+                    buf->m_param.strides[2] = new_strides[2];
+                    buf->m_param.strides[3] = new_strides[3];
+                }
+            }
+        }
+        if (emptyColumnsFound) {
+            common::removeEmptyDimensions<Param, BufferNode, ShiftNode>(
+                outputs, node_clones);
+        }
+
+        full_nodes.clear();
+        for (Node_ptr& node : node_clones) { full_nodes.push_back(node.get()); }
+    }
+
+    threadsMgt<dim_t> th(outDims, ndims, nrInputs, nrOutputs, totalSize,
+                         outputSizeofType);
+    auto ker = getKernel(output_nodes, output_ids, full_nodes, full_ids,
+                         is_linear, th.loop0, th.loop1, th.loop3);
+    const cl::NDRange local{th.genLocal(ker)};
+    const cl::NDRange global{th.genGlobal(local)};
+
+    int nargs{0};
+    for (const Node* node : full_nodes) {
+        nargs = node->setArgs(
+            nargs, is_linear,
+            [&ker](int id, const void* ptr, size_t arg_size, bool is_buffer) {
+                ker.setArg(id, arg_size, ptr);
+            });
+    }
+
+    // Set output parameters
+    for (const auto& output : outputs) {
+        ker.setArg(nargs++, *(output.data));
+        ker.setArg(nargs++, static_cast<int>(output.info.offset));
+    }
+
+    // Set dimensions
+    // All outputs are asserted to be of same size
+    // Just use the size from the first output
+    ker.setArg(nargs++, out_info);
+
+    {
+        using namespace opencl::kernel_logger;
+        AF_TRACE(
+            "Launching : Dims: [{},{},{},{}] Global: [{},{},{}] Local: "
+            "[{},{},{}] threads: {}",
+            outDims[0], outDims[1], outDims[2], outDims[3], global[0],
+            global[1], global[2], local[0], local[1], local[2],
+            global[0] * global[1] * global[2]);
+    }
+    getQueue().enqueueNDRangeKernel(ker, NullRange, global, local);
+
+    // Reset the thread local vectors
+    nodes.clear();
+    output_ids.clear();
+    full_nodes.clear();
+    full_ids.clear();
+}
+
+void evalNodes(Param& out, Node* node) {
+    vector<Param> outputs{out};
+    vector<Node*> nodes{node};
     return evalNodes(outputs, nodes);
 }
 
-}
+}  // namespace opencl
+}  // namespace arrayfire

@@ -1,78 +1,134 @@
+# Copyright (c) 2022, ArrayFire
+# All rights reserved.
+#
+# This file is distributed under 3-clause BSD license.
+# The complete license agreement can be obtained at:
+# http://arrayfire.com/licenses/BSD-3-Clause
 
-FILE(GLOB unified_headers
-    "*.hpp"
-    "*.h")
+generate_product_version(af_unified_ver_res_file
+  FILE_NAME "af"
+  FILE_DESCRIPTION "Unified Backend Dynamic-link library"
+)
 
-FILE(GLOB unified_sources
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+add_library(af "")
+add_library(ArrayFire::af ALIAS af)
 
-LIST(SORT unified_headers)
-LIST(SORT unified_sources)
+target_sources(af
+  PRIVATE
+    ${af_unified_ver_res_file}
+    algorithm.cpp
+    arith.cpp
+    array.cpp
+    blas.cpp
+    data.cpp
+    device.cpp
+    error.cpp
+    event.cpp
+    features.cpp
+    graphics.cpp
+    image.cpp
+    index.cpp
+    internal.cpp
+    jit_test_api.cpp
+    lapack.cpp
+    memory.cpp
+    ml.cpp
+    moments.cpp
+    random.cpp
+    signal.cpp
+    sparse.cpp
+    statistics.cpp
+    symbol_manager.cpp
+    symbol_manager.hpp
+    util.cpp
+    vision.cpp
 
-SOURCE_GROUP(api\\unified\\Headers FILES ${unified_headers})
-SOURCE_GROUP(api\\unified\\Sources FILES ${unified_sources})
+    $<$<BOOL:${OpenCL_FOUND}>: ${CMAKE_CURRENT_SOURCE_DIR}/opencl.cpp>
+    $<$<BOOL:${CUDA_FOUND}>: ${CMAKE_CURRENT_SOURCE_DIR}/cuda.cpp>
 
-FILE(GLOB cpp_sources
-    "../cpp/*.cpp")
-
-LIST(SORT cpp_sources)
-
-SOURCE_GROUP(api\\cpp\\Sources FILES ${cpp_sources})
-
-FILE(GLOB common_sources
-  "../c/version.cpp"
-  "../c/err_common.cpp"
-  "../c/type_util.cpp"
-  "../../backend/dim4.cpp"
-  "../../backend/util.cpp"
+    ${ArrayFire_SOURCE_DIR}/src/api/c/type_util.cpp
+    ${ArrayFire_SOURCE_DIR}/src/api/c/version.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/Logger.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/Logger.hpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/constants.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/dim4.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/err_common.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/util.cpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/util.hpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/deprecated.hpp
   )
 
-LIST(SORT common_sources)
+if(WIN32)
+  target_sources(af
+    PRIVATE
+      ${ArrayFire_SOURCE_DIR}/src/backend/common/module_loading_windows.cpp)
+else()
+  target_sources(af
+    PRIVATE
+      ${ArrayFire_SOURCE_DIR}/src/backend/common/module_loading_unix.cpp)
+endif()
 
-SOURCE_GROUP(common FILES ${common_sources})
+target_compile_definitions(af PRIVATE AF_UNIFIED)
 
-IF(NOT UNIX)
-    ADD_DEFINITIONS(-DAFDLL)
-ENDIF()
+target_include_directories(af
+  PUBLIC
+    $<BUILD_INTERFACE:${ArrayFire_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${ArrayFire_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${AF_INSTALL_INC_DIR}>
+  PRIVATE
+    ${ArrayFire_SOURCE_DIR}/src/api/c
+    ${ArrayFire_SOURCE_DIR}/src/api/unified)
 
-# OS Definitions
-IF(UNIX)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -pthread -Wno-comment")
-ENDIF()
+target_include_directories(af
+  SYSTEM PRIVATE
+    $<TARGET_PROPERTY:afcommon_interface,INTERFACE_INCLUDE_DIRECTORIES>
+    $<$<BOOL:${OpenCL_FOUND}>: $<TARGET_PROPERTY:OpenCL::OpenCL,INTERFACE_INCLUDE_DIRECTORIES>>
+    $<$<BOOL:${CUDA_FOUND}>:  ${CUDA_INCLUDE_DIRS}>
+  )
 
-ADD_LIBRARY(af SHARED
-            ${unified_headers}
-            ${unified_sources}
-            ${common_sources}
-            ${cpp_sources}
-            )
+target_link_libraries(af
+  PRIVATE
+    af_spdlog
+    cpp_api_interface
+    Threads::Threads
+    Boost::boost
+    ${CMAKE_DL_LIBS}
+  )
 
-IF(${BUILD_CPU})
-    ADD_DEPENDENCIES(af afcpu)
-ENDIF()
+if(TARGET fmt::fmt)
+  target_link_libraries(af
+    PRIVATE
+      fmt::fmt
+  )
+endif()
 
-IF(${BUILD_CUDA})
-    ADD_DEPENDENCIES(af afcuda)
-ENDIF()
+install(TARGETS af
+  EXPORT ArrayFireUnifiedTargets
+  COMPONENT unified
+  PUBLIC_HEADER DESTINATION af
+  RUNTIME DESTINATION ${AF_INSTALL_BIN_DIR}
+  LIBRARY DESTINATION ${AF_INSTALL_LIB_DIR}
+  ARCHIVE DESTINATION ${AF_INSTALL_LIB_DIR}
+  FRAMEWORK DESTINATION framework
+  INCLUDES DESTINATION ${AF_INSTALL_INC_DIR}
+  )
 
-IF(${BUILD_OPENCL})
-    ADD_DEPENDENCIES(af afopencl)
-ENDIF()
+af_split_debug_info(af ${AF_INSTALL_LIB_DIR})
 
-TARGET_LINK_LIBRARIES(af ${CMAKE_DL_LIBS})
+# install(TARGETS af EXPORT AF DESTINATION "${AF_INSTALL_LIB_DIR}"
+#   COMPONENT libraries)
+#
+# if(APPLE)
+#   INSTALL(SCRIPT "${PROJECT_SOURCE_DIR}/CMakeModules/osx_install/InstallTool.cmake")
+# endif(APPLE)
+#
+# export(TARGETS af FILE ArrayFireUnified.cmake)
+# install(EXPORT AF DESTINATION "${AF_INSTALL_CMAKE_DIR}"
+#   COMPONENT cmake
+#   FILE ArrayFireUnified.cmake)
 
-SET_TARGET_PROPERTIES(af PROPERTIES
-                      VERSION "${AF_VERSION}"
-                      SOVERSION "${AF_VERSION_MAJOR}")
-
-INSTALL(TARGETS af EXPORT AF DESTINATION "${AF_INSTALL_LIB_DIR}"
-        COMPONENT libraries)
-
-IF(APPLE)
-    INSTALL(SCRIPT "${PROJECT_SOURCE_DIR}/CMakeModules/osx_install/InstallTool.cmake")
-ENDIF(APPLE)
-
-EXPORT(TARGETS af FILE ArrayFireUnified.cmake)
-INSTALL(EXPORT AF DESTINATION "${AF_INSTALL_CMAKE_DIR}"
-        COMPONENT cmake
-        FILE ArrayFireUnified.cmake)
+source_group(include REGULAR_EXPRESSION ${ArrayFire_SOURCE_DIR}/include/*)
+source_group(source REGULAR_EXPRESSION ${CMAKE_CURRENT_SOURCE_DIR}/*|${ArrayFire_SOURCE_DIR}/src/backend/common/*)
+source_group(api\\cpp REGULAR_EXPRESSION ${ArrayFire_SOURCE_DIR}/src/api/cpp/*)
+source_group(api\\c REGULAR_EXPRESSION ${ArrayFire_SOURCE_DIR}/src/api/c/*)
+source_group("" FILES CMakeLists.txt)

@@ -8,19 +8,16 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <shift.hpp>
+#include <kernel/shift.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
-#include <kernel/shift.hpp>
+#include <shift.hpp>
 
-namespace cpu
-{
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-Array<T> shift(const Array<T> &in, const int sdims[4])
-{
-    in.eval();
-
+Array<T> shift(const Array<T> &in, const int sdims[4]) {
     Array<T> out = createEmptyArray<T>(in.dims());
     const af::dim4 temp(sdims[0], sdims[1], sdims[2], sdims[3]);
 
@@ -29,8 +26,8 @@ Array<T> shift(const Array<T> &in, const int sdims[4])
     return out;
 }
 
-#define INSTANTIATE(T)                                                  \
-    template Array<T> shift<T>(const Array<T> &in, const int sdims[4]); \
+#define INSTANTIATE(T) \
+    template Array<T> shift<T>(const Array<T> &in, const int sdims[4]);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -45,4 +42,5 @@ INSTANTIATE(char)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
 
-}
+}  // namespace cpu
+}  // namespace arrayfire

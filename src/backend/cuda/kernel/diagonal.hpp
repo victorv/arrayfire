@@ -7,84 +7,65 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <dispatch.hpp>
-#include <err_cuda.hpp>
-#include <platform.hpp>
-#include <debug_cuda.hpp>
+#pragma once
+
 #include <Param.hpp>
-#include <math.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
+#include <debug_cuda.hpp>
+#include <nvrtc_kernel_headers/diagonal_cuh.hpp>
 
-namespace cuda
-{
-namespace kernel
-{
-    template<typename T>
-    __global__ static void
-    diagCreateKernel(Param<T> out, CParam<T> in, int num, int blocks_x)
-    {
-        unsigned idz = blockIdx.x / blocks_x;
-        unsigned blockIdx_x = blockIdx.x - idz * blocks_x;
+namespace arrayfire {
+namespace cuda {
+namespace kernel {
 
-        unsigned idx = threadIdx.x + blockIdx_x * blockDim.x;
-        unsigned idy = threadIdx.y + blockIdx.y * blockDim.y;
+template<typename T>
+void diagCreate(Param<T> out, CParam<T> in, int num) {
+    auto genDiagMat = common::getKernel("arrayfire::cuda::createDiagonalMat",
+                                        {{diagonal_cuh_src}},
+                                        TemplateArgs(TemplateTypename<T>()));
 
-        if (idx >= out.dims[0] ||
-            idy >= out.dims[1] ||
-            idz >= out.dims[2]) return;
+    dim3 threads(32, 8);
+    int blocks_x = divup(out.dims[0], threads.x);
+    int blocks_y = divup(out.dims[1], threads.y);
+    dim3 blocks(blocks_x * out.dims[2], blocks_y);
 
-
-        T *optr = out.ptr + idz * out.strides[2] + idy * out.strides[1] + idx;
-        const T *iptr = in.ptr  + idz *  in.strides[1] + ((num > 0) ? idx : idy);
-
-        T val = (idx == (idy - num)) ? *iptr : scalar<T>(0);
-        *optr = val;
+    const int maxBlocksY    = getDeviceProp(getActiveDeviceId()).maxGridSize[1];
+    const int blocksPerMatZ = divup(blocks.y, maxBlocksY);
+    if (blocksPerMatZ > 1) {
+        blocks.y = maxBlocksY;
+        blocks.z = blocksPerMatZ;
     }
 
-    template<typename T>
-    static void diagCreate(Param<T> out, CParam<T> in, int num)
-    {
-        dim3 threads(32, 8);
-        int blocks_x = divup(out.dims[0], threads.x);
-        int blocks_y = divup(out.dims[1], threads.y);
-        dim3 blocks(blocks_x * out.dims[2], blocks_y);
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
 
-        CUDA_LAUNCH((diagCreateKernel<T>), blocks, threads, out, in, num, blocks_x);
-        POST_LAUNCH_CHECK();
-    }
+    genDiagMat(qArgs, out, in, num, blocks_x);
 
-    template<typename T>
-    __global__ static void
-    diagExtractKernel(Param<T> out, CParam<T> in, int num, int blocks_z)
-    {
-        unsigned idw = blockIdx.y / blocks_z;
-        unsigned idz = blockIdx.y  - idw * blocks_z;
-
-        unsigned idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-        if (idx >= out.dims[0] ||
-            idz >= out.dims[2] ||
-            idw >= out.dims[3]) return;
-
-        T *optr = out.ptr + idz * out.strides[2] + idw * out.strides[3] + idx;
-
-        if (idx >= in.dims[0] || idx >= in.dims[1]) *optr = scalar<T>(0);
-
-        int i_off = (num > 0) ? (num * in.strides[1] + idx) : (idx - num);
-        const T *iptr = in.ptr  + idz *  in.strides[2] + idw *  in.strides[3] + i_off;
-        *optr = iptr[idx * in.strides[1]];
-    }
-
-    template<typename T>
-    static void diagExtract(Param<T> out, CParam<T> in, int num)
-    {
-        dim3 threads(256, 1);
-        int blocks_x = divup(out.dims[0], threads.x);
-        int blocks_z = out.dims[2];
-        dim3 blocks(blocks_x, out.dims[3] * blocks_z);
-
-        CUDA_LAUNCH((diagExtractKernel<T>), blocks, threads, out, in, num, blocks_z);
-        POST_LAUNCH_CHECK();
-    }
-
+    POST_LAUNCH_CHECK();
 }
+
+template<typename T>
+void diagExtract(Param<T> out, CParam<T> in, int num) {
+    auto extractDiag = common::getKernel("arrayfire::cuda::extractDiagonal",
+                                         {{diagonal_cuh_src}},
+                                         TemplateArgs(TemplateTypename<T>()));
+
+    dim3 threads(256, 1);
+    int blocks_x = divup(out.dims[0], threads.x);
+    int blocks_z = out.dims[2];
+    dim3 blocks(blocks_x, out.dims[3] * blocks_z);
+
+    const int maxBlocksY = getDeviceProp(getActiveDeviceId()).maxGridSize[1];
+    blocks.z             = divup(blocks.y, maxBlocksY);
+    blocks.y             = divup(blocks.y, blocks.z);
+
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
+
+    extractDiag(qArgs, out, in, num, blocks_z);
+
+    POST_LAUNCH_CHECK();
 }
+
+}  // namespace kernel
+}  // namespace cuda
+}  // namespace arrayfire

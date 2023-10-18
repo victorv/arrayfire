@@ -9,10 +9,11 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-
-template<typename T, bool is_color>
-Array<T> meanshift(const Array<T> &in, const float &s_sigma, const float &c_sigma, const unsigned iter);
-
-}
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+Array<T> meanshift(const Array<T> &in, const float &spatialSigma,
+                   const float &chromaticSigma, const unsigned &numIterations,
+                   const bool &isColor);
+}  // namespace cuda
+}  // namespace arrayfire

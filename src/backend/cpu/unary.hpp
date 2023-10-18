@@ -7,108 +7,118 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
 #include <Array.hpp>
-#include <optypes.hpp>
 #include <err_cpu.hpp>
-#include <TNJ/UnaryNode.hpp>
+#include <jit/UnaryNode.hpp>
+#include <optypes.hpp>
 #include <cmath>
 
-namespace cpu
-{
-#define sign(in) std::signbit(in)
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-T sigmoid(T in)
-{
+T sigmoid(T in) {
     return (1.0) / (1 + std::exp(-in));
 }
 
-#define UNARY_FN(op)                            \
-    template<typename T>                        \
-    struct UnOp<T, T, af_##op##_t>              \
-    {                                           \
-        T eval(T in)                            \
-        {                                       \
-            return op(in);                      \
-        }                                       \
-    };                                          \
+template<typename T>
+T rsqrt(T in) {
+    return pow(in, -0.5);
+}
 
-UNARY_FN(sin)
-UNARY_FN(cos)
-UNARY_FN(tan)
+#define UNARY_OP_FN(op, fn)                                       \
+    template<typename T>                                          \
+    struct UnOp<T, T, af_##op##_t> {                              \
+        void eval(jit::array<compute_t<T>> &out,                  \
+                  const jit::array<compute_t<T>> &in, int lim) {  \
+            for (int i = 0; i < lim; i++) { out[i] = fn(in[i]); } \
+        }                                                         \
+    };
 
-UNARY_FN(asin)
-UNARY_FN(acos)
-UNARY_FN(atan)
+#define UNARY_OP(op) UNARY_OP_FN(op, std::op)
 
-UNARY_FN(sinh)
-UNARY_FN(cosh)
-UNARY_FN(tanh)
+UNARY_OP(sin)
+UNARY_OP(cos)
+UNARY_OP(tan)
 
-UNARY_FN(asinh)
-UNARY_FN(acosh)
-UNARY_FN(atanh)
+UNARY_OP(asin)
+UNARY_OP(acos)
+UNARY_OP(atan)
 
-UNARY_FN(round)
-UNARY_FN(trunc)
-UNARY_FN(sign )
-UNARY_FN(floor)
-UNARY_FN(ceil)
+UNARY_OP(sinh)
+UNARY_OP(cosh)
+UNARY_OP(tanh)
 
-UNARY_FN(exp)
-UNARY_FN(sigmoid)
-UNARY_FN(expm1)
-UNARY_FN(erf)
-UNARY_FN(erfc)
+UNARY_OP(asinh)
+UNARY_OP(acosh)
+UNARY_OP(atanh)
 
-UNARY_FN(log)
-UNARY_FN(log10)
-UNARY_FN(log1p)
-UNARY_FN(log2)
+UNARY_OP(round)
+UNARY_OP(trunc)
+UNARY_OP(signbit)
+UNARY_OP(floor)
+UNARY_OP(ceil)
 
-UNARY_FN(sqrt)
-UNARY_FN(cbrt)
+UNARY_OP(exp)
+UNARY_OP_FN(sigmoid, sigmoid)
+UNARY_OP(expm1)
+UNARY_OP(erf)
+UNARY_OP(erfc)
 
-UNARY_FN(tgamma)
-UNARY_FN(lgamma)
+UNARY_OP(log)
+UNARY_OP(log10)
+UNARY_OP(log1p)
+UNARY_OP(log2)
 
-#undef UNARY_FN
-#undef sign
+UNARY_OP(sqrt)
+UNARY_OP_FN(rsqrt, rsqrt)
+UNARY_OP(cbrt)
 
-    template<typename T, af_op_t op>
-    Array<T> unaryOp(const Array<T> &in)
-    {
-        TNJ::Node_ptr in_node = in.getNode();
-        TNJ::UnaryNode<T, T, op> *node = new TNJ::UnaryNode<T, T, op>(in_node);
+UNARY_OP(tgamma)
+UNARY_OP(lgamma)
+UNARY_OP_FN(noop, )  /// Empty second parameter so it does nothing
 
-        return createNodeArray<T>(in.dims(),
-                                  TNJ::Node_ptr(reinterpret_cast<TNJ::Node *>(node)));
-    }
+UNARY_OP_FN(bitnot, ~)
+
+#undef UNARY_OP
+#undef UNARY_OP_FN
+
+template<typename T, af_op_t op>
+Array<T> unaryOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
+    using UnaryNode = jit::UnaryNode<T, T, op>;
+
+    common::Node_ptr in_node = in.getNode();
+    auto node                = std::make_shared<UnaryNode>(in_node);
+
+    if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
+    return createNodeArray<T>(outDim, move(node));
+}
 
 #define iszero(a) ((a) == 0)
 
-#define CHECK_FN(name ,op)                      \
-    template<typename T>                        \
-    struct UnOp<char, T, af_##name##_t>         \
-    {                                           \
-        char eval(T in)                         \
-        {                                       \
-            return op(in);                      \
-        }                                       \
-    };                                          \
+#define CHECK_FN(name, op)                                                   \
+    template<typename T>                                                     \
+    struct UnOp<char, T, af_##name##_t> {                                    \
+        void eval(jit::array<char> &out, const jit::array<compute_t<T>> &in, \
+                  int lim) {                                                 \
+            for (int i = 0; i < lim; i++) { out[i] = op(in[i]); }            \
+        }                                                                    \
+    };
 
-    CHECK_FN(isinf, std::isinf)
-    CHECK_FN(isnan, std::isnan)
-    CHECK_FN(iszero, iszero)
+CHECK_FN(isinf, std::isinf)
+CHECK_FN(isnan, std::isnan)
+CHECK_FN(iszero, iszero)
+#undef iszero
 
-    template<typename T, af_op_t op>
-    Array<char> checkOp(const Array<T> &in)
-    {
-        TNJ::Node_ptr in_node = in.getNode();
-        TNJ::UnaryNode<char, T, op> *node = new TNJ::UnaryNode<char, T, op>(in_node);
+template<typename T, af_op_t op>
+Array<char> checkOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
+    common::Node_ptr in_node = in.getNode();
+    auto node = std::make_shared<jit::UnaryNode<char, T, op>>(in_node);
 
-        return createNodeArray<char>(in.dims(),
-                                     TNJ::Node_ptr(reinterpret_cast<TNJ::Node *>(node)));
-    }
-
+    if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
+    return createNodeArray<char>(outDim, move(node));
 }
+
+}  // namespace cpu
+}  // namespace arrayfire

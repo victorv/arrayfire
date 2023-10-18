@@ -10,14 +10,7 @@
 #ifndef __MAGMA_COMMON_H
 #define __MAGMA_COMMON_H
 
-#ifdef __APPLE__
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#endif
-
-#define HAVE_clBLAS
-#include <clBLAS.h>
+#include <cl2hpp.hpp>
 
 #include "magma_types.h"
 

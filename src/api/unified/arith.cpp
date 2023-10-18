@@ -7,16 +7,16 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
 #include <af/arith.h>
+#include <af/array.h>
 #include "symbol_manager.hpp"
 
-#define BINARY_HAPI_DEF(af_func) \
-af_err af_func(af_array* out, const af_array lhs, const af_array rhs, const bool batchMode) \
-{ \
-    CHECK_ARRAYS(lhs, rhs); \
-    return CALL(out, lhs, rhs, batchMode); \
-}
+#define BINARY_HAPI_DEF(af_func)                                          \
+    af_err af_func(af_array* out, const af_array lhs, const af_array rhs, \
+                   const bool batchMode) {                                \
+        CHECK_ARRAYS(lhs, rhs);                                           \
+        CALL(af_func, out, lhs, rhs, batchMode);                          \
+    }
 
 BINARY_HAPI_DEF(af_add)
 BINARY_HAPI_DEF(af_mul)
@@ -45,18 +45,16 @@ BINARY_HAPI_DEF(af_bitshiftl)
 BINARY_HAPI_DEF(af_bitshiftr)
 BINARY_HAPI_DEF(af_hypot)
 
-af_err af_cast(af_array *out, const af_array in, const af_dtype type)
-{
+af_err af_cast(af_array* out, const af_array in, const af_dtype type) {
     CHECK_ARRAYS(in);
-    return CALL(out, in, type);
+    CALL(af_cast, out, in, type);
 }
 
-#define UNARY_HAPI_DEF(af_func) \
-af_err af_func(af_array* out, const af_array in) \
-{ \
-    CHECK_ARRAYS(in); \
-    return CALL(out, in); \
-}
+#define UNARY_HAPI_DEF(af_func)                        \
+    af_err af_func(af_array* out, const af_array in) { \
+        CHECK_ARRAYS(in);                              \
+        CALL(af_func, out, in);                        \
+    }
 
 UNARY_HAPI_DEF(af_abs)
 UNARY_HAPI_DEF(af_arg)
@@ -92,6 +90,7 @@ UNARY_HAPI_DEF(af_log1p)
 UNARY_HAPI_DEF(af_log10)
 UNARY_HAPI_DEF(af_log2)
 UNARY_HAPI_DEF(af_sqrt)
+UNARY_HAPI_DEF(af_rsqrt)
 UNARY_HAPI_DEF(af_cbrt)
 UNARY_HAPI_DEF(af_factorial)
 UNARY_HAPI_DEF(af_tgamma)
@@ -100,10 +99,10 @@ UNARY_HAPI_DEF(af_iszero)
 UNARY_HAPI_DEF(af_isinf)
 UNARY_HAPI_DEF(af_isnan)
 UNARY_HAPI_DEF(af_not)
+UNARY_HAPI_DEF(af_bitnot)
 
-af_err af_clamp(af_array *out, const af_array in,
-                const af_array lo, const af_array hi, const bool batch)
-{
+af_err af_clamp(af_array* out, const af_array in, const af_array lo,
+                const af_array hi, const bool batch) {
     CHECK_ARRAYS(in, lo, hi);
-    return CALL(out, in, lo, hi, batch);
+    CALL(af_clamp, out, in, lo, hi, batch);
 }

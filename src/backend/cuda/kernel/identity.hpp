@@ -7,55 +7,38 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <dispatch.hpp>
-#include <err_cuda.hpp>
-#include <platform.hpp>
-#include <debug_cuda.hpp>
+#pragma once
+
 #include <Param.hpp>
-#include <math.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
+#include <debug_cuda.hpp>
+#include <nvrtc_kernel_headers/identity_cuh.hpp>
 
-namespace cuda
-{
-namespace kernel
-{
+namespace arrayfire {
+namespace cuda {
+namespace kernel {
 
-    template<typename T>
-    __global__
-    static void identity_kernel(Param<T> out, int blocks_x, int blocks_y)
-    {
-        const dim_t idz = blockIdx.x / blocks_x;
-        const dim_t idw = blockIdx.y / blocks_y;
+template<typename T>
+void identity(Param<T> out) {
+    auto identity =
+        common::getKernel("arrayfire::cuda::identity", {{identity_cuh_src}},
+                          TemplateArgs(TemplateTypename<T>()));
 
-        const dim_t blockIdx_x = blockIdx.x - idz * blocks_x;
-        const dim_t blockIdx_y = blockIdx.y - idw * blocks_y;
+    dim3 threads(32, 8);
+    int blocks_x = divup(out.dims[0], threads.x);
+    int blocks_y = divup(out.dims[1], threads.y);
+    dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
 
-        const dim_t idx = threadIdx.x + blockIdx_x * blockDim.x;
-        const dim_t idy = threadIdx.y + blockIdx_y * blockDim.y;
+    const int maxBlocksY = getDeviceProp(getActiveDeviceId()).maxGridSize[1];
+    blocks.z             = divup(blocks.y, maxBlocksY);
+    blocks.y             = divup(blocks.y, blocks.z);
 
-        if(idx >= out.dims[0] ||
-           idy >= out.dims[1] ||
-           idz >= out.dims[2] ||
-           idw >= out.dims[3])
-            return;
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
 
-        const T one  = scalar<T>(1);
-        const T zero = scalar<T>(0);
-
-        T *ptr = out.ptr + idz * out.strides[2] + idw * out.strides[3];
-        T val = (idx == idy) ? one : zero;
-        ptr[idx + idy * out.strides[1]] = val;
-    }
-
-    template<typename T>
-    static void identity(Param<T> out)
-    {
-        dim3 threads(32, 8);
-        int blocks_x = divup(out.dims[0], threads.x);
-        int blocks_y = divup(out.dims[1], threads.y);
-        dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
-
-        CUDA_LAUNCH((identity_kernel<T>), blocks, threads, out, blocks_x, blocks_y);
-        POST_LAUNCH_CHECK();
-    }
+    identity(qArgs, out, blocks_x, blocks_y);
+    POST_LAUNCH_CHECK();
 }
-}
+}  // namespace kernel
+}  // namespace cuda
+}  // namespace arrayfire

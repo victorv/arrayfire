@@ -8,34 +8,22 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/laset_band.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <types.hpp>
+#include <kernel_headers/laset_band.hpp>
 #include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace opencl
-{
-
-namespace kernel
-{
-
-#if 0 // Needs to be enabled when unmqr2 is enabled
+#if 0  // Needs to be enabled when unmqr2 is enabled
 static const int NB = 64;
 template<int num>
 const char *laset_band_name() { return "laset_none"; }
@@ -47,30 +35,19 @@ void laset_band(int m, int  n, int k,
                 T offdiag, T diag,
                 cl_mem dA, size_t dA_offset, magma_int_t ldda)
 {
+    static const std::string src(laset_band_cl, laset_band_cl_len);
 
-    static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-    static std::map<int, Program*>  setProgs;
-    static std::map<int, Kernel*> setKernels;
+    std::array<TemplateArg, 2> targs = {
+        TemplateTypename<T>(), TemplateArg(uplo),
+    };
+    std::array<std::string, 4> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(NB),
+        DefineKeyValue(IS_CPLX, static_cast<int>(iscplx<T>())),
+        getTypeBuildDefinition<T>()
+    };
 
-    int device = getActiveDeviceId();
-
-    std::call_once(compileFlags[device], [device] () {
-
-            std::ostringstream options;
-            options << " -D T=" << dtype_traits<T>::getName()
-                    << " -D NB=" << NB
-                    << " -D IS_CPLX=" << af::iscplx<T>();
-
-            if (std::is_same<T, double>::value ||
-                std::is_same<T, cdouble>::value) {
-                options << " -D USE_DOUBLE";
-            }
-
-            cl::Program prog;
-            buildProgram(prog, laset_band_cl, laset_band_cl_len, options.str());
-            setProgs[device] = new Program(prog);
-            setKernels[device] = new Kernel(*setProgs[device], laset_band_name<uplo>());
-        });
+    auto lasetBandOp = common::getKernel(laset_band_name<uplo>(), {src}, targs, options);
 
     int threads = 1;
     int groups = 1;
@@ -83,15 +60,13 @@ void laset_band(int m, int  n, int k,
         groups = (std::min(m+k-1, n) - 1) / NB + 1;
     }
 
-    NDRange local(threads, 1);
-    NDRange global(threads * groups, 1);
+    cl::NDRange local(threads, 1);
+    cl::NDRange global(threads * groups, 1);
 
-    auto lasetBandOp = KernelFunctor<int, int, T, T, cl_mem, unsigned long long, int>(*setKernels[device]);
+    lasetBandOp(cl::EnqueueArgs(getQueue(), global, local), m, n, offdiag, diag, dA, dA_offset, ldda);
+}
+#endi
 
-    lasetBandOp(EnqueueArgs(getQueue(), global, local),
-                m, n, offdiag, diag, dA, dA_offset, ldda);
-}
-#endif
-
-}
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

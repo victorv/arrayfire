@@ -8,18 +8,30 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <optypes.hpp>
+#include <common/jit/ScalarNode.hpp>
 #include <math.hpp>
-#include <JIT/ScalarNode.hpp>
+#include <optypes.hpp>
+#include <memory>
 
-namespace cuda
-{
+namespace arrayfire {
+namespace cuda {
 
 template<typename T>
-Array<T> createScalarNode(const dim4 &size, const T val)
-{
-    JIT::ScalarNode<T> *node = new JIT::ScalarNode<T>(val);
-    return createNodeArray<T>(size, JIT::Node_ptr(reinterpret_cast<JIT::Node *>(node)));
+Array<T> createScalarNode(const dim4 &size, const T val) {
+#if _MSC_VER > 1914
+    // FIXME(pradeep) - Needed only in CUDA backend, didn't notice any
+    // issues in other backends.
+    // Either this gaurd or we need to enable extended alignment
+    // by defining _ENABLE_EXTENDED_ALIGNED_STORAGE before <type_traits>
+    // header is included
+    using ScalarNode    = common::ScalarNode<T>;
+    using ScalarNodePtr = std::shared_ptr<ScalarNode>;
+    return createNodeArray<T>(size, ScalarNodePtr(new ScalarNode(val)));
+#else
+    return createNodeArray<T>(size,
+                              std::make_shared<common::ScalarNode<T>>(val));
+#endif
 }
 
-}
+}  // namespace cuda
+}  // namespace arrayfire

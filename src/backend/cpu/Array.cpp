@@ -7,246 +7,297 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/dim4.hpp>
-#include <err_common.hpp>
 #include <Array.hpp>
-#include <copy.hpp>
 #include <kernel/Array.hpp>
-#include <TNJ/BufferNode.hpp>
-#include <TNJ/ScalarNode.hpp>
+
+#include <Param.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/err_common.hpp>
+#include <common/half.hpp>
+#include <common/jit/NodeIterator.hpp>
+#include <common/traits.hpp>
+#include <copy.hpp>
+#include <jit/BufferNode.hpp>
+#include <jit/Node.hpp>
+#include <jit/ScalarNode.hpp>
 #include <memory.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
-#include <cstring>
+#include <traits.hpp>
+
+#include <af/defines.h>
+#include <af/dim4.hpp>
+#include <af/seq.h>
+#include <af/traits.hpp>
+
+#include <nonstd/span.hpp>
+#include <algorithm>  // IWYU pragma: keep
 #include <cstddef>
-#include <MemoryManager.hpp>
-
-namespace cpu
-{
-
-const int MAX_TNJ_LEN = 20;
-using TNJ::BufferNode;
-using TNJ::Node;
-using TNJ::Node_ptr;
+#include <cstring>
+#include <type_traits>
+#include <utility>
 
 using af::dim4;
+using arrayfire::common::half;
+using arrayfire::common::Node;
+using arrayfire::common::Node_map_t;
+using arrayfire::common::Node_ptr;
+using arrayfire::common::NodeIterator;
+using arrayfire::cpu::jit::BufferNode;
+
+using nonstd::span;
+using std::accumulate;
+using std::adjacent_find;
+using std::copy;
+using std::find_if;
+using std::is_standard_layout;
+using std::make_shared;
+using std::move;
+using std::vector;
+
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-Array<T>::Array(dim4 dims):
-    info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
-    data(memAlloc<T>(dims.elements()), memFree<T>), data_dims(dims),
-    node(), ready(true), owner(true)
-{ }
+shared_ptr<BufferNode<T>> bufferNodePtr() {
+    return std::make_shared<BufferNode<T>>();
+}
 
 template<typename T>
-Array<T>::Array(dim4 dims, const T * const in_data, bool is_device, bool copy_device):
-    info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
-    data((is_device & !copy_device) ? (T*)in_data : memAlloc<T>(dims.elements()), memFree<T>), data_dims(dims),
-    node(), ready(true), owner(true)
-{
-    static_assert(std::is_standard_layout<Array<T>>::value, "Array<T> must be a standard layout type");
-    static_assert(offsetof(Array<T>, info) == 0, "Array<T>::info must be the first member variable of Array<T>");
+Array<T>::Array(dim4 dims)
+    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(memAlloc<T>(dims.elements()).release(), memFree)
+    , data_dims(dims)
+    , node()
+    , owner(true) {}
+
+template<typename T>
+Array<T>::Array(const dim4 &dims, T *const in_data, bool is_device,
+                bool copy_device)
+    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data((is_device & !copy_device) ? in_data
+                                      : memAlloc<T>(dims.elements()).release(),
+           memFree)
+    , data_dims(dims)
+    , node()
+    , owner(true) {
+    static_assert(is_standard_layout<Array<T>>::value,
+                  "Array<T> must be a standard layout type");
+    static_assert(std::is_nothrow_move_assignable<Array<T>>::value,
+                  "Array<T> is not move assignable");
+    static_assert(std::is_nothrow_move_constructible<Array<T>>::value,
+                  "Array<T> is not move constructible");
+    static_assert(
+        offsetof(Array<T>, info) == 0,
+        "Array<T>::info must be the first member variable of Array<T>");
     if (!is_device || copy_device) {
-        std::copy(in_data, in_data + dims.elements(), data.get());
+        // Ensure the memory being written to isnt used anywhere else.
+        getQueue().sync();
+        copy(in_data, in_data + dims.elements(), data.get());
     }
 }
 
 template<typename T>
-Array<T>::Array(af::dim4 dims, TNJ::Node_ptr n) :
-    info(getActiveDeviceId(), dims, 0, calcStrides(dims), (af_dtype)dtype_traits<T>::af_type),
-    data(), data_dims(dims),
-    node(n), ready(false), owner(true)
-{
-}
+Array<T>::Array(const af::dim4 &dims, Node_ptr n)
+    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data()
+    , data_dims(dims)
+    , node(move(n))
+    , owner(true) {}
 
 template<typename T>
-Array<T>::Array(const Array<T>& parent, const dim4 &dims, const dim_t &offset_, const dim4 &strides) :
-    info(parent.getDevId(), dims, offset_, strides, (af_dtype)dtype_traits<T>::af_type),
-    data(parent.getData()), data_dims(parent.getDataDims()),
-    node(),
-    ready(true), owner(false)
-{ }
+Array<T>::Array(const Array<T> &parent, const dim4 &dims, const dim_t &offset_,
+                const dim4 &strides)
+    : info(parent.getDevId(), dims, offset_, strides,
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(parent.getData())
+    , data_dims(parent.getDataDims())
+    , node()
+    , owner(false) {}
 
 template<typename T>
-Array<T>::Array(af::dim4 dims, af::dim4 strides, dim_t offset_,
-                const T * const in_data, bool is_device) :
-    info(getActiveDeviceId(), dims, offset_, strides, (af_dtype)dtype_traits<T>::af_type),
-    data(is_device ? (T*)in_data : memAlloc<T>(info.total()), memFree<T>),
-    data_dims(dims),
-    node(),
-    ready(true),
-    owner(true)
-{
+Array<T>::Array(const dim4 &dims, const dim4 &strides, dim_t offset_,
+                T *const in_data, bool is_device)
+    : info(getActiveDeviceId(), dims, offset_, strides,
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(is_device ? in_data : memAlloc<T>(info.total()).release(), memFree)
+    , data_dims(dims)
+    , node()
+    , owner(true) {
     if (!is_device) {
-        std::copy(in_data, in_data + info.total(), data.get());
+        // Ensure the memory being written to isnt used anywhere else.
+        getQueue().sync();
+        copy(in_data, in_data + info.total(), data.get());
     }
 }
 
 template<typename T>
-void Array<T>::eval()
-{
-    if (isReady()) return;
-    if (getQueue().is_worker()) AF_ERROR("Array not evaluated", AF_ERR_INTERNAL);
-
-    this->setId(getActiveDeviceId());
-
-    data = std::shared_ptr<T>(memAlloc<T>(elements()), memFree<T>);
-
-    getQueue().enqueue(kernel::evalArray<T>, *this);
-    // Reset shared_ptr
-    this->node.reset();
-    ready = true;
-}
-
-template<typename T>
-void Array<T>::eval() const
-{
-    if (isReady()) return;
-    const_cast<Array<T> *>(this)->eval();
-}
-
-template<typename T>
-T* Array<T>::device()
-{
-    getQueue().sync();
-    if (!isOwner() || getOffset() || data.use_count() > 1) {
-        *this = copyArray<T>(*this);
-    }
-    return this->get();
-}
-
-template<typename T>
-void evalMultiple(std::vector<Array<T>*> arrays)
-{
-    //FIXME: implement this correctly
-    //Using fallback for now
-    for (auto array : arrays) {
-        array->eval();
-    }
+void checkAndMigrate(const Array<T> &arr) {
     return;
 }
 
 template<typename T>
-Node_ptr Array<T>::getNode() const
-{
-    if (!node) {
+void Array<T>::eval() {
+    evalMultiple<T>({this});
+}
 
-        unsigned bytes = this->getDataDims().elements() * sizeof(T);
+template<typename T>
+void Array<T>::eval() const {
+    const_cast<Array<T> *>(this)->eval();
+}
 
-        BufferNode<T> *buf_node = new BufferNode<T>(data,
-                                                    bytes,
-                                                    getOffset(),
-                                                    dims().get(),
-                                                    strides().get(),
-                                                    isLinear());
+template<typename T>
+T *Array<T>::device() {
+    if (!isOwner() || getOffset() || data.use_count() > 1) {
+        *this = copyArray<T>(*this);
+    }
+    getQueue().sync();
+    return this->get();
+}
 
-        const_cast<Array<T> *>(this)->node = Node_ptr(reinterpret_cast<Node *>(buf_node));
+template<typename T>
+void evalMultiple(vector<Array<T> *> array_ptrs) {
+    vector<Array<T> *> outputs;
+    vector<common::Node_ptr> nodes;
+    vector<Param<T>> params;
+    if (getQueue().is_worker()) {
+        AF_ERROR("Array not evaluated", AF_ERR_INTERNAL);
     }
 
-    return node;
-}
+    // Check if all the arrays have the same dimension
+    auto it = adjacent_find(begin(array_ptrs), end(array_ptrs),
+                            [](const Array<T> *l, const Array<T> *r) {
+                                return l->dims() != r->dims();
+                            });
 
-template<typename T>
-Array<T>
-createHostDataArray(const dim4 &size, const T * const data)
-{
-    return Array<T>(size, data, false);
-}
-
-template<typename T>
-Array<T>
-createDeviceDataArray(const dim4 &size, const void *data)
-{
-    return Array<T>(size, (const T * const) data, true);
-}
-
-template<typename T>
-Array<T>
-createValueArray(const dim4 &size, const T& value)
-{
-    TNJ::ScalarNode<T> *node = new TNJ::ScalarNode<T>(value);
-    return createNodeArray<T>(size, TNJ::Node_ptr(
-                                  reinterpret_cast<TNJ::Node *>(node)));
-}
-
-template<typename T>
-Array<T>
-createEmptyArray(const dim4 &size)
-{
-    return Array<T>(size);
-}
-
-template<typename T>
-Array<T> *initArray() { return new Array<T>(dim4(0, 0, 0, 0)); }
-
-template<typename T>
-Array<T>
-createNodeArray(const dim4 &dims, Node_ptr node)
-{
-    Array<T> out =  Array<T>(dims, node);
-
-    if (evalFlag()) {
-        if (node->getHeight() >= (int)getMaxJitSize()) {
-            out.eval();
-        } else {
-            size_t alloc_bytes, alloc_buffers;
-            size_t lock_bytes, lock_buffers;
-
-            deviceMemoryInfo(&alloc_bytes, &alloc_buffers,
-                             &lock_bytes, &lock_buffers);
-
-            // Check if approaching the memory limit
-            if (lock_bytes > getMaxBytes() ||
-                lock_buffers > getMaxBuffers()) {
-
-                // Calling sync to ensure the TNJ calls below
-                // don't overwrite the same nodes being evaluated
-                // FIXME: This should ideally be JIT specific mutex
-                getQueue().sync();
-
-                unsigned length =0, buf_count = 0, bytes = 0;
-                Node *n = node.get();
-                n->getInfo(length, buf_count, bytes);
-                n->reset();
-
-                if (2 * bytes > lock_bytes) {
-                    out.eval();
-                }
-            }
-        }
+    // If they are not the same. eval individually
+    if (it != end(array_ptrs)) {
+        for (auto ptr : array_ptrs) { ptr->eval(); }
+        return;
     }
 
+    for (Array<T> *array : array_ptrs) {
+        if (array->isReady()) { continue; }
+
+        array->setId(getActiveDeviceId());
+        array->data =
+            shared_ptr<T>(memAlloc<T>(array->elements()).release(), memFree);
+
+        outputs.push_back(array);
+        params.emplace_back(array->getData().get(), array->dims(),
+                            array->strides());
+        nodes.push_back(array->node);
+    }
+
+    if (params.empty()) return;
+
+    getQueue().enqueue(cpu::kernel::evalMultiple<T>, params, nodes);
+
+    for (Array<T> *array : outputs) { array->node.reset(); }
+}
+
+template<typename T>
+Node_ptr Array<T>::getNode() {
+    if (node) { return node; }
+
+    std::shared_ptr<BufferNode<T>> out = bufferNodePtr<T>();
+    unsigned bytes = this->getDataDims().elements() * sizeof(T);
+    out->setData(data, bytes, getOffset(), dims().get(), strides().get(),
+                 isLinear());
     return out;
 }
 
 template<typename T>
-Array<T> createSubArray(const Array<T>& parent,
-                        const std::vector<af_seq> &index,
-                        bool copy)
-{
+Node_ptr Array<T>::getNode() const {
+    return const_cast<Array<T> *>(this)->getNode();
+}
+
+template<typename T>
+Array<T> createHostDataArray(const dim4 &dims, const T *const data) {
+    return Array<T>(dims, const_cast<T *>(data), false);
+}
+
+template<typename T>
+Array<T> createDeviceDataArray(const dim4 &dims, void *data, bool copy) {
+    bool is_device = true;
+    return Array<T>(dims, static_cast<T *>(data), is_device, copy);
+}
+
+template<typename T>
+Array<T> createValueArray(const dim4 &dims, const T &value) {
+    return createNodeArray<T>(dims, make_shared<jit::ScalarNode<T>>(value));
+}
+
+template<typename T>
+Array<T> createEmptyArray(const dim4 &dims) {
+    return Array<T>(dims);
+}
+
+template<typename T>
+kJITHeuristics passesJitHeuristics(span<Node *> root_nodes) {
+    if (!evalFlag()) { return kJITHeuristics::Pass; }
+    size_t bytes = 0;
+    for (Node *n : root_nodes) {
+        if (n->getHeight() > static_cast<int>(getMaxJitSize())) {
+            return kJITHeuristics::TreeHeight;
+        }
+        // Check if approaching the memory limit
+        if (getMemoryPressure() >= getMemoryPressureThreshold()) {
+            NodeIterator<Node> it(n);
+            NodeIterator<Node> end_node;
+            bytes = accumulate(it, end_node, bytes,
+                               [=](const size_t prev, const Node &n) {
+                                   // getBytes returns the size of the data
+                                   // Array. Sub arrays will be represented
+                                   // by their parent size.
+                                   return prev + n.getBytes();
+                               });
+        }
+    }
+
+    if (jitTreeExceedsMemoryPressure(bytes)) {
+        return kJITHeuristics::MemoryPressure;
+    }
+
+    return kJITHeuristics::Pass;
+}
+
+template<typename T>
+Array<T> createNodeArray(const dim4 &dims, Node_ptr node) {
+    Array<T> out(dims, node);
+    return out;
+}
+
+template<typename T>
+Array<T> createSubArray(const Array<T> &parent, const vector<af_seq> &index,
+                        bool copy) {
     parent.eval();
 
-    dim4 dDims = parent.getDataDims();
-    dim4 pDims = parent.dims();
+    dim4 dDims          = parent.getDataDims();
+    dim4 parent_strides = parent.strides();
 
-    dim4 dims    = toDims  (index, pDims);
-    dim4 strides = toStride (index, dDims);
+    if (parent.isLinear() == false) {
+        const Array<T> parentCopy = copyArray(parent);
+        return createSubArray(parentCopy, index, copy);
+    }
+
+    const dim4 &pDims = parent.dims();
+    dim4 dims         = toDims(index, pDims);
+    dim4 strides      = toStride(index, dDims);
 
     // Find total offsets after indexing
     dim4 offsets = toOffset(index, pDims);
-    dim4 parent_strides = parent.strides();
     dim_t offset = parent.getOffset();
-    for (int i = 0; i < 4; i++) offset += offsets[i] * parent_strides[i];
+    for (int i = 0; i < 4; i++) { offset += offsets[i] * parent_strides[i]; }
 
     Array<T> out = Array<T>(parent, dims, offset, strides);
 
-    if (!copy) return out;
+    if (!copy) { return out; }
 
-    if (strides[0] != 1 ||
-        strides[1] <  0 ||
-        strides[2] <  0 ||
-        strides[3] <  0) {
-
+    if (strides[0] != 1 || strides[1] < 0 || strides[2] < 0 || strides[3] < 0) {
         out = copyArray(out);
     }
 
@@ -254,56 +305,61 @@ Array<T> createSubArray(const Array<T>& parent,
 }
 
 template<typename T>
-void
-destroyArray(Array<T> *A)
-{
+void destroyArray(Array<T> *A) {
     delete A;
 }
 
 template<typename T>
-void
-writeHostDataArray(Array<T> &arr, const T * const data, const size_t bytes)
-{
-    if(!arr.isOwner()) {
-        arr = copyArray<T>(arr);
-    }
+void writeHostDataArray(Array<T> &arr, const T *const data,
+                        const size_t bytes) {
+    if (!arr.isOwner()) { arr = copyArray<T>(arr); }
     arr.eval();
+    // Ensure the memory being written to isnt used anywhere else.
+    getQueue().sync();
     memcpy(arr.get(), data, bytes);
 }
 
 template<typename T>
-void
-writeDeviceDataArray(Array<T> &arr, const void * const data, const size_t bytes)
-{
-    if(!arr.isOwner()) {
-        arr = copyArray<T>(arr);
-    }
-    memcpy(arr.get(), (const T * const)data, bytes);
+void writeDeviceDataArray(Array<T> &arr, const void *const data,
+                          const size_t bytes) {
+    if (!arr.isOwner()) { arr = copyArray<T>(arr); }
+    memcpy(arr.get(), static_cast<const T *const>(data), bytes);
 }
 
-#define INSTANTIATE(T)                                                  \
-    template       Array<T>  createHostDataArray<T>   (const dim4 &size, const T * const data); \
-    template       Array<T>  createDeviceDataArray<T> (const dim4 &size, const void *data); \
-    template       Array<T>  createValueArray<T>      (const dim4 &size, const T &value); \
-    template       Array<T>  createEmptyArray<T>      (const dim4 &size); \
-    template       Array<T>  *initArray<T      >      ();               \
-    template       Array<T>  createSubArray<T>        (const Array<T> &parent, \
-                                                       const std::vector<af_seq> &index, \
-                                                       bool copy);      \
-    template       void      destroyArray<T>          (Array<T> *A);    \
-    template       Array<T>  createNodeArray<T>       (const dim4 &size, TNJ::Node_ptr node); \
-    template       void Array<T>::eval();                               \
-    template       void Array<T>::eval() const;                         \
-    template       T*   Array<T>::device();                             \
-    template       Array<T>::Array(af::dim4 dims, const T * const in_data, \
-                                   bool is_device, bool copy_device);   \
-    template       Array<T>::Array(af::dim4 dims, af::dim4 strides, dim_t offset, \
-                                   const T * const in_data,             \
-                                   bool is_device);                     \
-    template       TNJ::Node_ptr Array<T>::getNode() const;             \
-    template       void      writeHostDataArray<T>    (Array<T> &arr, const T * const data, const size_t bytes); \
-    template       void      writeDeviceDataArray<T>  (Array<T> &arr, const void * const data, const size_t bytes); \
-    template       void      evalMultiple<T>     (std::vector<Array<T>*> arrays); \
+template<typename T>
+void Array<T>::setDataDims(const dim4 &new_dims) {
+    data_dims = new_dims;
+    modDims(new_dims);
+}
+
+#define INSTANTIATE(T)                                                        \
+    template Array<T> createHostDataArray<T>(const dim4 &dims,                \
+                                             const T *const data);            \
+    template Array<T> createDeviceDataArray<T>(const dim4 &dims, void *data,  \
+                                               bool copy);                    \
+    template Array<T> createValueArray<T>(const dim4 &dims, const T &value);  \
+    template Array<T> createEmptyArray<T>(const dim4 &dims);                  \
+    template Array<T> createSubArray<T>(                                      \
+        const Array<T> &parent, const vector<af_seq> &index, bool copy);      \
+    template void destroyArray<T>(Array<T> * A);                              \
+    template Array<T> createNodeArray<T>(const dim4 &dims, Node_ptr node);    \
+    template void Array<T>::eval();                                           \
+    template void Array<T>::eval() const;                                     \
+    template T *Array<T>::device();                                           \
+    template Array<T>::Array(const af::dim4 &dims, T *const in_data,          \
+                             bool is_device, bool copy_device);               \
+    template Array<T>::Array(const af::dim4 &dims, const af::dim4 &strides,   \
+                             dim_t offset, T *const in_data, bool is_device); \
+    template Node_ptr Array<T>::getNode();                                    \
+    template Node_ptr Array<T>::getNode() const;                              \
+    template void writeHostDataArray<T>(Array<T> & arr, const T *const data,  \
+                                        const size_t bytes);                  \
+    template void writeDeviceDataArray<T>(                                    \
+        Array<T> & arr, const void *const data, const size_t bytes);          \
+    template void evalMultiple<T>(vector<Array<T> *> arrays);                 \
+    template kJITHeuristics passesJitHeuristics<T>(span<Node *> n);           \
+    template void Array<T>::setDataDims(const dim4 &new_dims);                \
+    template void checkAndMigrate<T>(const Array<T> &arr);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -317,5 +373,7 @@ INSTANTIATE(intl)
 INSTANTIATE(uintl)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+INSTANTIATE(half)
 
-}
+}  // namespace cpu
+}  // namespace arrayfire

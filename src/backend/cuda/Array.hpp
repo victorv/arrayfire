@@ -8,250 +8,305 @@
  ********************************************************/
 #pragma once
 
-// Workaround for BOOST_NOINLINE not being defined with nvcc / CUDA < 6.5
-#if CUDA_VERSION < 6050
-#ifndef BOOST_NOINLINE
-#define BOOST_NOINLINE __attribute__ ((noinline))
-#endif
-#endif
-
-#include <af/dim4.hpp>
-#include <ArrayInfo.hpp>
-#include "traits.hpp"
-#include <backend.hpp>
-#include <types.hpp>
-#include <traits.hpp>
-#include <cuda_runtime_api.h>
 #include <Param.hpp>
-#include <JIT/Node.hpp>
-#include <boost/shared_ptr.hpp>
-#include <vector>
+#include <backend.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/MemoryManagerBase.hpp>
+#include <common/jit/Node.hpp>
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+#include <jit/BufferNode.hpp>
 #include <memory.hpp>
+#include <platform.hpp>
+#include <traits.hpp>
+#include <types.hpp>
+#include <af/dim4.hpp>
+#include "traits.hpp"
 
-namespace cuda
-{
+#include <nonstd/span.hpp>
+#include <vector>
 
-    using af::dim4;
-    using boost::shared_ptr;
+namespace arrayfire {
+namespace cuda {
 
-    template<typename T> class Array;
+using af::dim4;
 
-    template<typename T>
-    void evalNodes(Param<T> &out, JIT::Node *node);
+template<typename T>
+class Array;
 
-    template<typename T>
-    void evalNodes(std::vector<Param<T> > &out, std::vector<JIT::Node *> nodes);
+/// Checks if the Array object can be migrated to the current device and if not,
+/// an error is thrown
+///
+/// \param[in] arr The Array that will be checked.
+template<typename T>
+void checkAndMigrate(Array<T> &arr);
 
-    template<typename T>
-    void evalMultiple(std::vector<Array<T> *> arrays);
+template<typename T>
+void evalNodes(Param<T> out, common::Node *node);
 
-    // Creates a new Array object on the heap and returns a reference to it.
-    template<typename T>
-    Array<T> createNodeArray(const af::dim4 &size, JIT::Node_ptr node);
+template<typename T>
+void evalNodes(std::vector<Param<T>> &out,
+               const std::vector<common::Node *> &nodes);
 
-    // Creates a new Array object on the heap and returns a reference to it.
-    template<typename T>
-    Array<T> createValueArray(const af::dim4 &size, const T& value);
+template<typename T>
+void evalMultiple(std::vector<Array<T> *> arrays);
 
-    // Creates a new Array object on the heap and returns a reference to it.
-    template<typename T>
-    Array<T> createHostDataArray(const af::dim4 &size, const T * const data);
+template<typename T>
+Array<T> createNodeArray(const af::dim4 &dims, common::Node_ptr node);
 
-    template<typename T>
-    Array<T> createDeviceDataArray(const af::dim4 &size, const void *data);
+template<typename T>
+Array<T> createValueArray(const af::dim4 &dims, const T &value);
 
-    // Copies data to an existing Array object from a host pointer
-    template<typename T>
-    void writeHostDataArray(Array<T> &arr, const T * const data, const size_t bytes);
+// Creates an array and copies from the \p data pointer located in host memory
+//
+// \param[in] dims The dimension of the array
+// \param[in] data The data that will be copied to the array
+template<typename T>
+Array<T> createHostDataArray(const af::dim4 &dims, const T *const data);
 
-    // Copies data to an existing Array object from a device pointer
-    template<typename T>
-    void writeDeviceDataArray(Array<T> &arr, const void * const data, const size_t bytes);
+/// Creates an Array<T> object from a device pointer.
+///
+/// \param[in] dims The shape of the resulting Array.
+/// \param[in] data The device pointer to the data
+/// \param[in] copy If true, memory will be allocated and the data will be
+///                 copied to the device. If false the data will be used
+///                 directly
+/// \returns The new Array<T> object based on the device pointer.
+template<typename T>
+Array<T> createDeviceDataArray(const af::dim4 &dims, void *data,
+                               bool copy = false);
 
-    // Create an Array object and do not assign any values to it
-    template<typename T> Array<T> *initArray();
+template<typename T>
+Array<T> createStridedArray(const af::dim4 &dims, const af::dim4 &strides,
+                            dim_t offset, const T *const in_data,
+                            bool is_device) {
+    return Array<T>(dims, strides, offset, in_data, is_device);
+}
 
-    template<typename T>
-    Array<T> createEmptyArray(const af::dim4 &size);
+/// Copies data to an existing Array object from a host pointer
+template<typename T>
+void writeHostDataArray(Array<T> &arr, const T *const data, const size_t bytes);
 
-    // Create an Array object from Param<T>
-    template<typename T>
-    Array<T> createParamArray(Param<T> &tmp);
+/// Copies data to an existing Array object from a device pointer
+template<typename T>
+void writeDeviceDataArray(Array<T> &arr, const void *const data,
+                          const size_t bytes);
 
-    template<typename T>
-    Array<T> createSubArray(const Array<T>& parent,
-                            const std::vector<af_seq> &index,
-                            bool copy=true);
+/// Creates an empty array of a given size. No data is initialized
+///
+/// \param[in] size The dimension of the output array
+template<typename T>
+Array<T> createEmptyArray(const af::dim4 &dims);
 
-    // Creates a new Array object on the heap and returns a reference to it.
-    template<typename T>
-    void destroyArray(Array<T> *A);
+/// Create an Array object from Param<T> object.
+///
+/// \param[in] in    The Param<T> array that is created.
+/// \param[in] owner If true, the new Array<T> object is the owner of the data.
+/// If false
+///                  the Array<T> will not delete the object on destruction
+template<typename T>
+Array<T> createParamArray(Param<T> &tmp, bool owner);
 
-    template<typename T>
-    void *getDevicePtr(const Array<T>& arr)
-    {
-        T *ptr = arr.device();
-        memLock(ptr);
-        return (void *)ptr;
+template<typename T>
+Array<T> createSubArray(const Array<T> &parent,
+                        const std::vector<af_seq> &index, bool copy = true);
+
+// Creates a new Array object on the heap and returns a reference to it.
+template<typename T>
+void destroyArray(Array<T> *A);
+
+/// \brief Checks if the Node can be compiled successfully and the buffers
+///        references are not consuming most of the allocated memory
+///
+/// \param [in] node The root node which needs to be checked
+///
+/// \returns false if the kernel generated by this node will fail to compile
+///          or its nodes are consuming too much memory.
+template<typename T>
+kJITHeuristics passesJitHeuristics(nonstd::span<common::Node *> node);
+
+template<typename T>
+void *getDevicePtr(const Array<T> &arr) {
+    T *ptr = arr.device();
+    memLock(ptr);
+    return (void *)ptr;
+}
+
+template<typename T>
+void *getRawPtr(const Array<T> &arr) {
+    return (void *)(arr.get(false));
+}
+
+template<typename T>
+class Array {
+    ArrayInfo info;  // This must be the first element of Array<T>
+
+    /// Pointer to the data
+    std::shared_ptr<T> data;
+
+    /// The shape of the underlying parent data.
+    af::dim4 data_dims;
+
+    /// Null if this a buffer node. Otherwise this points to a JIT node
+    common::Node_ptr node;
+
+    /// If true, the Array object is the parent. If false the data object points
+    /// to another array's data
+    bool owner;
+
+    Array(const af::dim4 &dims);
+
+    explicit Array(const af::dim4 &dims, const T *const in_data,
+                   bool is_device = false, bool copy_device = false);
+    Array(const Array<T> &parent, const dim4 &dims, const dim_t &offset,
+          const dim4 &stride);
+    Array(Param<T> &tmp, bool owner);
+    Array(const af::dim4 &dims, common::Node_ptr n);
+
+    std::shared_ptr<T> getData() const { return data; }
+
+   public:
+    Array(const Array<T> &other) = default;
+
+    Array(Array<T> &&other) noexcept = default;
+
+    Array<T> &operator=(Array<T> other) noexcept {
+        swap(other);
+        return *this;
     }
 
-    template<typename T>
-    void *getRawPtr(const Array<T>& arr)
-    {
-        return (void *)(arr.get(false));
+    void swap(Array<T> &other) noexcept {
+        using std::swap;
+        swap(info, other.info);
+        swap(data, other.data);
+        swap(data_dims, other.data_dims);
+        swap(node, other.node);
+        swap(owner, other.owner);
     }
 
-    template<typename T>
-    class Array
-    {
-        ArrayInfo       info; // This must be the first element of Array<T>
-        shared_ptr<T> data;
-        af::dim4 data_dims;
+    Array(const af::dim4 &dims, const af::dim4 &strides, dim_t offset,
+          const T *const in_data, bool is_device = false);
 
-        JIT::Node_ptr node;
-        bool ready;
-        bool owner;
+    void resetInfo(const af::dim4 &dims) { info.resetInfo(dims); }
+    void resetDims(const af::dim4 &dims) { info.resetDims(dims); }
+    void modDims(const af::dim4 &newDims) { info.modDims(newDims); }
+    void modStrides(const af::dim4 &newStrides) { info.modStrides(newStrides); }
+    void setId(int id) { info.setId(id); }
 
-        Array(af::dim4 dims);
-
-        explicit Array(af::dim4 dims, const T * const in_data, bool is_device = false, bool copy_device = false);
-        Array(const Array<T>& parnt, const dim4 &dims, const dim_t &offset, const dim4 &stride);
-        Array(Param<T> &tmp);
-        Array(af::dim4 dims, JIT::Node_ptr n);
-    public:
-
-        Array(af::dim4 dims, af::dim4 strides, dim_t offset,
-              const T * const in_data, bool is_device = false);
-
-        void resetInfo(const af::dim4& dims)        { info.resetInfo(dims);         }
-        void resetDims(const af::dim4& dims)        { info.resetDims(dims);         }
-        void modDims(const af::dim4 &newDims)       { info.modDims(newDims);        }
-        void modStrides(const af::dim4 &newStrides) { info.modStrides(newStrides);  }
-        void setId(int id)                          { info.setId(id);               }
-
-#define INFO_FUNC(RET_TYPE, NAME)   \
+#define INFO_FUNC(RET_TYPE, NAME) \
     RET_TYPE NAME() const { return info.NAME(); }
 
-        INFO_FUNC(const af_dtype& ,getType)
-        INFO_FUNC(const af::dim4& ,strides)
-        INFO_FUNC(size_t          ,elements)
-        INFO_FUNC(size_t          ,ndims)
-        INFO_FUNC(const af::dim4& ,dims )
-        INFO_FUNC(int             ,getDevId)
+    INFO_FUNC(const af_dtype &, getType)
+    INFO_FUNC(const af::dim4 &, strides)
+    INFO_FUNC(dim_t, elements)
+    INFO_FUNC(dim_t, ndims)
+    INFO_FUNC(const af::dim4 &, dims)
+    INFO_FUNC(int, getDevId)
 
 #undef INFO_FUNC
 
-#define INFO_IS_FUNC(NAME)\
-    bool NAME () const { return info.NAME(); }
+#define INFO_IS_FUNC(NAME) \
+    bool NAME() const { return info.NAME(); }
 
-        INFO_IS_FUNC(isEmpty);
-        INFO_IS_FUNC(isScalar);
-        INFO_IS_FUNC(isRow);
-        INFO_IS_FUNC(isColumn);
-        INFO_IS_FUNC(isVector);
-        INFO_IS_FUNC(isComplex);
-        INFO_IS_FUNC(isReal);
-        INFO_IS_FUNC(isDouble);
-        INFO_IS_FUNC(isSingle);
-        INFO_IS_FUNC(isRealFloating);
-        INFO_IS_FUNC(isFloating);
-        INFO_IS_FUNC(isInteger);
-        INFO_IS_FUNC(isBool);
-        INFO_IS_FUNC(isLinear);
-        INFO_IS_FUNC(isSparse);
+    INFO_IS_FUNC(isEmpty);
+    INFO_IS_FUNC(isScalar);
+    INFO_IS_FUNC(isRow);
+    INFO_IS_FUNC(isColumn);
+    INFO_IS_FUNC(isVector);
+    INFO_IS_FUNC(isComplex);
+    INFO_IS_FUNC(isReal);
+    INFO_IS_FUNC(isDouble);
+    INFO_IS_FUNC(isSingle);
+    INFO_IS_FUNC(isHalf);
+    INFO_IS_FUNC(isRealFloating);
+    INFO_IS_FUNC(isFloating);
+    INFO_IS_FUNC(isInteger);
+    INFO_IS_FUNC(isBool);
+    INFO_IS_FUNC(isLinear);
+    INFO_IS_FUNC(isSparse);
 
 #undef INFO_IS_FUNC
 
-        ~Array();
+    ~Array() = default;
 
-        bool isReady() const { return ready; }
-        bool isOwner() const { return owner; }
+    bool isReady() const { return static_cast<bool>(node) == false; }
+    bool isOwner() const { return owner; }
 
-        void eval();
-        void eval() const;
+    void eval();
+    void eval() const;
 
-        dim_t getOffset() const { return info.getOffset(); }
-        shared_ptr<T> getData() const { return data; }
+    dim_t getOffset() const { return info.getOffset(); }
 
-        dim4 getDataDims() const
-        {
-            return data_dims;
-        }
+    dim4 getDataDims() const { return data_dims; }
 
-        void setDataDims(const dim4 &new_dims)
-        {
-            modDims(new_dims);
-            data_dims = new_dims;
-        }
+    void setDataDims(const dim4 &new_dims);
 
-        size_t getAllocatedBytes() const
-        {
+    size_t getAllocatedBytes() const {
+        if (!isReady()) return 0;
+        size_t bytes = memoryManager().allocated(data.get());
+        // External device poitner
+        if (bytes == 0 && data.get()) {
             return data_dims.elements() * sizeof(T);
         }
+        return bytes;
+    }
 
-        T* device();
+    T *device();
 
-        T* device() const
-        {
-            return const_cast<Array<T>*>(this)->device();
-        }
+    T *device() const { return const_cast<Array<T> *>(this)->device(); }
 
-        T* get(bool withOffset = true)
-        {
-            if (!isReady()) eval();
-            return const_cast<T*>(static_cast<const Array<T>*>(this)->get(withOffset));
-        }
+    T *get(bool withOffset = true) {
+        if (!isReady()) eval();
+        return const_cast<T *>(
+            static_cast<const Array<T> *>(this)->get(withOffset));
+    }
 
-        //FIXME: implement withOffset parameter
-        const   T* get(bool withOffset = true) const
-        {
-            if (!isReady()) eval();
-            return data.get() + (withOffset ? getOffset() : 0);
-        }
+    // FIXME: implement withOffset parameter
+    const T *get(bool withOffset = true) const {
+        if (!isReady()) eval();
+        return data.get() + (withOffset ? getOffset() : 0);
+    }
 
-        int useCount() const
-        {
-            if (!isReady()) eval();
-            return data.use_count();
-        }
+    int useCount() const { return data.use_count(); }
 
-        operator Param<T>()
-        {
-            Param<T> out;
-            out.ptr = this->get();
-            for (int  i = 0; i < 4; i++) {
-                out.dims[i] = dims()[i];
-                out.strides[i] = strides()[i];
-            }
-            return out;
-        }
+    operator Param<data_t<T>>() {
+        return Param<data_t<T>>(this->get(), this->dims().get(),
+                                this->strides().get());
+    }
 
-        operator CParam<T>() const
-        {
-            CParam<T> out(this->get(), this->dims().get(), this->strides().get());
-            return out;
-        }
+    operator CParam<data_t<T>>() const {
+        return CParam<data_t<T>>(this->get(), this->dims().get(),
+                                 this->strides().get());
+    }
 
-        JIT::Node_ptr getNode();
-        JIT::Node_ptr getNode() const;
+    common::Node_ptr getNode();
+    common::Node_ptr getNode() const;
 
-        friend void evalMultiple<T>(std::vector<Array<T> *> arrays);
-        friend Array<T> createValueArray<T>(const af::dim4 &size, const T& value);
-        friend Array<T> createHostDataArray<T>(const af::dim4 &size, const T * const data);
-        friend Array<T> createDeviceDataArray<T>(const af::dim4 &size, const void *data);
+    friend void evalMultiple<T>(std::vector<Array<T> *> arrays);
+    friend Array<T> createValueArray<T>(const af::dim4 &size, const T &value);
+    friend Array<T> createHostDataArray<T>(const af::dim4 &dims,
+                                           const T *const data);
+    friend Array<T> createDeviceDataArray<T>(const af::dim4 &dims, void *data,
+                                             bool copy);
+    friend Array<T> createStridedArray<T>(const af::dim4 &dims,
+                                          const af::dim4 &strides, dim_t offset,
+                                          const T *const in_data,
+                                          bool is_device);
 
-        friend Array<T> *initArray<T>();
-        friend Array<T> createEmptyArray<T>(const af::dim4 &size);
-        friend Array<T> createParamArray<T>(Param<T> &tmp);
-        friend Array<T> createNodeArray<T>(const af::dim4 &dims, JIT::Node_ptr node);
+    friend Array<T> createEmptyArray<T>(const af::dim4 &dims);
+    friend Array<T> createParamArray<T>(Param<T> &tmp, bool owner);
+    friend Array<T> createNodeArray<T>(const af::dim4 &dims,
+                                       common::Node_ptr node);
 
-        friend Array<T> createSubArray<T>(const Array<T>& parent,
-                                          const std::vector<af_seq> &index,
-                                          bool copy);
+    friend Array<T> createSubArray<T>(const Array<T> &parent,
+                                      const std::vector<af_seq> &index,
+                                      bool copy);
 
-        friend void destroyArray<T>(Array<T> *arr);
-        friend void *getDevicePtr<T>(const Array<T>& arr);
-        friend void *getRawPtr<T>(const Array<T>& arr);
-    };
+    friend void destroyArray<T>(Array<T> *arr);
+    friend void *getDevicePtr<T>(const Array<T> &arr);
+    friend void *getRawPtr<T>(const Array<T> &arr);
+    friend void checkAndMigrate<T>(Array<T> &arr);
+};
 
-}
+}  // namespace cuda
+}  // namespace arrayfire

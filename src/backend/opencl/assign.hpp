@@ -8,11 +8,13 @@
  ********************************************************/
 
 #include <Array.hpp>
+#include <af/index.h>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
 void assign(Array<T>& out, const af_index_t idxrs[], const Array<T>& rhs);
 
-}
+}  // namespace opencl
+}  // namespace arrayfire

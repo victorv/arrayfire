@@ -6,300 +6,140 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+#pragma once
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 
-#include <string>
-#include <fstream>
-#include <iterator>
-#include <vector>
-#include <algorithm>
-#include <limits>
-#include <stdexcept>
-#include <cfloat>
-#include <arrayfire.h>
-#include <af/dim4.hpp>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+#endif
+#include <half.hpp>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 #include <af/array.h>
+#include <af/defines.h>
+#include <af/dim4.hpp>
+#include <af/traits.hpp>
 
-typedef unsigned char  uchar;
-typedef unsigned int   uint;
+#include <gtest/gtest.h>
+
+#include <cfloat>
+#include <string>
+#include <vector>
+
+#if defined(USE_MTX)
+#include <mmio.h>
+#include <cstdlib>
+#endif
+
+/// GTest deprecated the INSTANTIATED_TEST_CASE_P macro in favor of the
+/// INSTANTIATE_TEST_SUITE_P macro which has the same syntax but the older
+/// versions of gtest do not support this new macro adds the
+/// INSTANTIATE_TEST_SUITE_P macro and maps it to the old macro
+#ifndef INSTANTIATE_TEST_SUITE_P
+#define INSTANTIATE_TEST_SUITE_P INSTANTIATE_TEST_CASE_P
+#endif
+#ifndef TYPED_TEST_SUITE
+#define TYPED_TEST_SUITE TYPED_TEST_CASE
+#endif
+
+bool operator==(const af_half &lhs, const af_half &rhs);
+
+std::ostream &operator<<(std::ostream &os, const af_half &val);
+
+#define UNUSED(expr) \
+    do { (void)(expr); } while (0)
+
+namespace aft {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+typedef intl intl;
+typedef uintl uintl;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+}  // namespace aft
+
+using aft::intl;
+using aft::uintl;
+
+std::ostream &operator<<(std::ostream &os, af::Backend bk);
+
+std::ostream &operator<<(std::ostream &os, af_err e);
+
+std::ostream &operator<<(std::ostream &os, af::dtype type);
+
+namespace af {
+template<>
+struct dtype_traits<half_float::half> {
+    enum { af_type = f16, ctype = f16 };
+    typedef half_float::half base_type;
+    static const char *getName() { return "half"; }
+};
+
+}  // namespace af
+
+typedef unsigned char uchar;
+typedef unsigned int uint;
 typedef unsigned short ushort;
+
+std::string getBackendName();
+std::string getTestName();
+
+std::string readNextNonEmptyLine(std::ifstream &file);
+
+namespace half_float {
+std::ostream &operator<<(std::ostream &os, half_float::half val);
+}  // namespace half_float
+
+template<typename To, typename Ti>
+To convert(Ti in) {
+    return static_cast<To>(in);
+}
+
+#ifndef EXTERN_TEMPLATE
+extern template float convert(af::half in);
+extern template af_half convert(int in);
+#endif
 
 template<typename inType, typename outType, typename FileElementType>
 void readTests(const std::string &FileName, std::vector<af::dim4> &inputDims,
-                std::vector<std::vector<inType> >   &testInputs,
-                std::vector<std::vector<outType> > &testOutputs)
-{
-    using std::vector;
-
-    std::ifstream testFile(FileName.c_str());
-    if(testFile.good()) {
-        unsigned inputCount;
-        testFile >> inputCount;
-        for(unsigned i=0; i<inputCount; i++) {
-            af::dim4 temp(1);
-            testFile >> temp;
-            inputDims.push_back(temp);
-        }
-
-        unsigned testCount;
-        testFile >> testCount;
-        testOutputs.resize(testCount);
-
-        vector<unsigned> testSizes(testCount);
-        for(unsigned i = 0; i < testCount; i++) {
-            testFile >> testSizes[i];
-        }
-
-        testInputs.resize(inputCount,vector<inType>(0));
-        for(unsigned k=0; k<inputCount; k++) {
-            unsigned nElems = inputDims[k].elements();
-            testInputs[k].resize(nElems);
-            FileElementType tmp;
-            for(unsigned i = 0; i < nElems; i++) {
-                testFile >> tmp;
-                testInputs[k][i] = tmp;
-            }
-        }
-
-        testOutputs.resize(testCount, vector<outType>(0));
-        for(unsigned i = 0; i < testCount; i++) {
-            testOutputs[i].resize(testSizes[i]);
-            FileElementType tmp;
-            for(unsigned j = 0; j < testSizes[i]; j++) {
-                testFile >> tmp;
-                testOutputs[i][j] = tmp;
-            }
-        }
-    }
-    else {
-        FAIL() << "TEST FILE NOT FOUND";
-    }
-}
+               std::vector<std::vector<inType>> &testInputs,
+               std::vector<std::vector<outType>> &testOutputs);
 
 template<typename inType, typename outType>
-void readTestsFromFile(const std::string &FileName, std::vector<af::dim4> &inputDims,
-                std::vector<std::vector<inType> >  &testInputs,
-                std::vector<std::vector<outType> > &testOutputs)
-{
-    using std::vector;
+void readTestsFromFile(const std::string &FileName,
+                       std::vector<af::dim4> &inputDims,
+                       std::vector<std::vector<inType>> &testInputs,
+                       std::vector<std::vector<outType>> &testOutputs);
 
-    std::ifstream testFile(FileName.c_str());
-    if(testFile.good()) {
-        unsigned inputCount;
-        testFile >> inputCount;
-        for(unsigned i=0; i<inputCount; i++) {
-            af::dim4 temp(1);
-            testFile >> temp;
-            inputDims.push_back(temp);
-        }
-
-        unsigned testCount;
-        testFile >> testCount;
-        testOutputs.resize(testCount);
-
-        vector<unsigned> testSizes(testCount);
-        for(unsigned i = 0; i < testCount; i++) {
-            testFile >> testSizes[i];
-        }
-
-        testInputs.resize(inputCount,vector<inType>(0));
-        for(unsigned k=0; k<inputCount; k++) {
-            unsigned nElems = inputDims[k].elements();
-            testInputs[k].resize(nElems);
-            inType tmp;
-            for(unsigned i = 0; i < nElems; i++) {
-                testFile >> tmp;
-                testInputs[k][i] = tmp;
-            }
-        }
-
-        testOutputs.resize(testCount, vector<outType>(0));
-        for(unsigned i = 0; i < testCount; i++) {
-            testOutputs[i].resize(testSizes[i]);
-            outType tmp;
-            for(unsigned j = 0; j < testSizes[i]; j++) {
-                testFile >> tmp;
-                testOutputs[i][j] = tmp;
-            }
-        }
-    }
-    else {
-        FAIL() << "TEST FILE NOT FOUND";
-    }
-}
-
-inline void readImageTests(const std::string        &pFileName,
-                           std::vector<af::dim4>    &pInputDims,
-                           std::vector<std::string> &pTestInputs,
-                           std::vector<dim_t>    &pTestOutSizes,
-                           std::vector<std::string> &pTestOutputs)
-{
-    using std::vector;
-
-    std::ifstream testFile(pFileName.c_str());
-    if(testFile.good()) {
-        unsigned inputCount;
-        testFile >> inputCount;
-        for(unsigned i=0; i<inputCount; i++) {
-            af::dim4 temp(1);
-            testFile >> temp;
-            pInputDims.push_back(temp);
-        }
-
-        unsigned testCount;
-        testFile >> testCount;
-        pTestOutputs.resize(testCount);
-
-        pTestOutSizes.resize(testCount);
-        for(unsigned i = 0; i < testCount; i++) {
-            testFile >> pTestOutSizes[i];
-        }
-
-        pTestInputs.resize(inputCount, "");
-        for(unsigned k=0; k<inputCount; k++) {
-            std::string temp = "";
-            while(std::getline(testFile, temp)) {
-                if (temp!="")
-                    break;
-            }
-            if (temp=="")
-                throw std::runtime_error("Test file might not be per format, please check.");
-            pTestInputs[k] = temp;
-        }
-
-        pTestOutputs.resize(testCount, "");
-        for(unsigned i = 0; i < testCount; i++) {
-            std::string temp = "";
-            while(std::getline(testFile, temp)) {
-                if (temp!="")
-                    break;
-            }
-            if (temp=="")
-                throw std::runtime_error("Test file might not be per format, please check.");
-            pTestOutputs[i] = temp;
-        }
-    }
-    else {
-        FAIL() << "TEST FILE NOT FOUND";
-    }
-}
+void readImageTests(const std::string &pFileName,
+                    std::vector<af::dim4> &pInputDims,
+                    std::vector<std::string> &pTestInputs,
+                    std::vector<dim_t> &pTestOutSizes,
+                    std::vector<std::string> &pTestOutputs);
 
 template<typename outType>
-void readImageTests(const std::string                 &pFileName,
-                    std::vector<af::dim4>             &pInputDims,
-                    std::vector<std::string>          &pTestInputs,
-                    std::vector<std::vector<outType> > &pTestOutputs)
-{
-    using std::vector;
-
-    std::ifstream testFile(pFileName.c_str());
-    if(testFile.good()) {
-        unsigned inputCount;
-        testFile >> inputCount;
-        for(unsigned i=0; i<inputCount; i++) {
-            af::dim4 temp(1);
-            testFile >> temp;
-            pInputDims.push_back(temp);
-        }
-
-        unsigned testCount;
-        testFile >> testCount;
-        pTestOutputs.resize(testCount);
-
-        vector<unsigned> testSizes(testCount);
-        for(unsigned i = 0; i < testCount; i++) {
-            testFile >> testSizes[i];
-        }
-
-        pTestInputs.resize(inputCount, "");
-        for(unsigned k=0; k<inputCount; k++) {
-            std::string temp = "";
-            while(std::getline(testFile, temp)) {
-                if (temp!="")
-                    break;
-            }
-            if (temp=="")
-                throw std::runtime_error("Test file might not be per format, please check.");
-            pTestInputs[k] = temp;
-        }
-
-        pTestOutputs.resize(testCount, vector<outType>(0));
-        for(unsigned i = 0; i < testCount; i++) {
-            pTestOutputs[i].resize(testSizes[i]);
-            outType tmp;
-            for(unsigned j = 0; j < testSizes[i]; j++) {
-                testFile >> tmp;
-                pTestOutputs[i][j] = tmp;
-            }
-        }
-    }
-    else {
-        FAIL() << "TEST FILE NOT FOUND";
-    }
-}
+void readImageTests(const std::string &pFileName,
+                    std::vector<af::dim4> &pInputDims,
+                    std::vector<std::string> &pTestInputs,
+                    std::vector<std::vector<outType>> &pTestOutputs);
 
 template<typename descType>
-void readImageFeaturesDescriptors(const std::string                  &pFileName,
-                                  std::vector<af::dim4>              &pInputDims,
-                                  std::vector<std::string>           &pTestInputs,
-                                  std::vector<std::vector<float> >    &pTestFeats,
-                                  std::vector<std::vector<descType> > &pTestDescs)
-{
-    using std::vector;
-
-    std::ifstream testFile(pFileName.c_str());
-    if(testFile.good()) {
-        unsigned inputCount;
-        testFile >> inputCount;
-        for(unsigned i=0; i<inputCount; i++) {
-            af::dim4 temp(1);
-            testFile >> temp;
-            pInputDims.push_back(temp);
-        }
-
-        unsigned attrCount, featCount, descLen;
-        testFile >> featCount;
-        testFile >> attrCount;
-        testFile >> descLen;
-        pTestFeats.resize(attrCount);
-
-        pTestInputs.resize(inputCount, "");
-        for(unsigned k=0; k<inputCount; k++) {
-            std::string temp = "";
-            while(std::getline(testFile, temp)) {
-                if (temp!="")
-                    break;
-            }
-            if (temp=="")
-                throw std::runtime_error("Test file might not be per format, please check.");
-            pTestInputs[k] = temp;
-        }
-
-        pTestFeats.resize(attrCount, vector<float>(0));
-        for(unsigned i = 0; i < attrCount; i++) {
-            pTestFeats[i].resize(featCount);
-            float tmp;
-            for(unsigned j = 0; j < featCount; j++) {
-                testFile >> tmp;
-                pTestFeats[i][j] = tmp;
-            }
-        }
-
-        pTestDescs.resize(featCount, vector<descType>(0));
-        for(unsigned i = 0; i < featCount; i++) {
-            pTestDescs[i].resize(descLen);
-            descType tmp;
-            for(unsigned j = 0; j < descLen; j++) {
-                testFile >> tmp;
-                pTestDescs[i][j] = tmp;
-            }
-        }
-    }
-    else {
-        FAIL() << "TEST FILE NOT FOUND";
-    }
-}
+void readImageFeaturesDescriptors(
+    const std::string &pFileName, std::vector<af::dim4> &pInputDims,
+    std::vector<std::string> &pTestInputs,
+    std::vector<std::vector<float>> &pTestFeats,
+    std::vector<std::vector<descType>> &pTestDescs);
 
 /**
  * Below is not a pair wise comparition method, rather
@@ -316,34 +156,13 @@ void readImageFeaturesDescriptors(const std::string                  &pFileName,
  * value of NRMSD. Hence, the range of RMSD is [0,255] for image inputs.
  */
 template<typename T>
-bool compareArraysRMSD(dim_t data_size, T *gold, T *data, double tolerance)
-{
-    double accum  = 0.0;
-    double maxion = FLT_MAX;//(double)std::numeric_limits<T>::lowest();
-    double minion = FLT_MAX;//(double)std::numeric_limits<T>::max();
+bool compareArraysRMSD(dim_t data_size, T *gold, T *data, double tolerance);
 
-    for(dim_t i=0;i<data_size;i++)
-    {
-        double dTemp = (double)data[i];
-        double gTemp = (double)gold[i];
-        double diff  = gTemp-dTemp;
-        double err   = std::abs(diff) > 1.0e-4 ? diff : 0.0f;
-        accum  += std::pow(err,2.0);
-        maxion  = std::max(maxion, dTemp);
-        minion  = std::min(minion, dTemp);
-    }
-    accum      /= data_size;
-    double NRMSD = std::sqrt(accum)/(maxion-minion);
-
-    std::cout<<"NRMSD = "<<NRMSD<<std::endl;
-    if (NRMSD > tolerance)
-        return false;
-
-    return true;
-}
+template<typename T>
+double computeArraysRMSD(dim_t data_size, T *gold, T *data);
 
 template<typename T, typename Other>
-struct is_same_type{
+struct is_same_type {
     static const bool value = false;
 };
 
@@ -365,92 +184,465 @@ struct cond_type<false, T, Other> {
     typedef Other type;
 };
 
-template<typename T>
-inline double real(T val) { return (double)val; }
-template<>
-inline double real<af::cdouble>(af::cdouble val) { return real(val); }
-template<>
-inline double real<af::cfloat> (af::cfloat val) { return real(val); }
+template<bool B, class T = void>
+struct enable_if {};
+
+template<class T>
+struct enable_if<true, T> {
+    typedef T type;
+};
 
 template<typename T>
-inline double imag(T val) { return (double)val; }
+inline double real(T val) {
+    return (double)val;
+}
 template<>
-inline double imag<af::cdouble>(af::cdouble val) { return imag(val); }
+inline double real<af::cdouble>(af::cdouble val) {
+    return real(val);
+}
 template<>
-inline double imag<af::cfloat> (af::cfloat val) { return imag(val); }
-
-template<typename T>
-bool noDoubleTests()
-{
-    af::dtype ty = (af::dtype)af::dtype_traits<T>::af_type;
-    bool isTypeDouble = (ty == f64) || (ty == c64);
-    int dev = af::getDevice();
-    bool isDoubleSupported = af::isDoubleAvailable(dev);
-
-    return ((isTypeDouble && !isDoubleSupported) ? true : false);
+inline double real<af::cfloat>(af::cfloat val) {
+    return real(val);
 }
 
-inline bool noImageIOTests()
-{
-    bool ret = !af::isImageIOAvailable();
-    if(ret) printf("Image IO Not Configured. Test will exit\n");
-    return ret;
+template<typename T>
+inline double imag(T val) {
+    return (double)val;
+}
+template<>
+inline double imag<af::cdouble>(af::cdouble val) {
+    return imag(val);
+}
+template<>
+inline double imag<af::cfloat>(af::cfloat val) {
+    return imag(val);
 }
 
-inline bool noLAPACKTests()
-{
-    bool ret = !af::isLAPACKAvailable();
-    if(ret) printf("LAPACK Not Configured. Test will exit\n");
-    return ret;
+template<class T>
+struct IsComplex {
+    static const bool value = is_same_type<af::cfloat, T>::value ||
+                              is_same_type<af::cdouble, T>::value;
+};
+
+template<class T>
+struct IsFloatingPoint {
+    static const bool value = is_same_type<half_float::half, T>::value ||
+                              is_same_type<float, T>::value ||
+                              is_same_type<double, T>::value ||
+                              is_same_type<long double, T>::value;
+};
+
+bool noDoubleTests(af::dtype ty);
+
+bool noHalfTests(af::dtype ty);
+
+#define SUPPORTED_TYPE_CHECK(type)                                \
+    if (noDoubleTests((af_dtype)af::dtype_traits<type>::af_type)) \
+        GTEST_SKIP() << "Device doesn't support Doubles";         \
+    if (noHalfTests((af_dtype)af::dtype_traits<type>::af_type))   \
+    GTEST_SKIP() << "Device doesn't support Half"
+
+#define LAPACK_ENABLED_CHECK() \
+    if (!af::isLAPACKAvailable()) GTEST_SKIP() << "LAPACK Not Configured."
+
+#define IMAGEIO_ENABLED_CHECK() \
+    if (!af::isImageIOAvailable()) GTEST_SKIP() << "Image IO Not Configured"
+
+#ifdef AF_WITH_FAST_MATH
+#define SKIP_IF_FAST_MATH_ENABLED() \
+    GTEST_SKIP() << "ArrayFire compiled with AF_WITH_FAST_MATH"
+#else
+#define SKIP_IF_FAST_MATH_ENABLED()
+#endif
+
+template<typename TO, typename FROM>
+TO convert_to(FROM in) {
+    return TO(in);
 }
 
 // TODO: perform conversion on device for CUDA and OpenCL
 template<typename T>
-af_err conv_image(af_array *out, af_array in)
-{
-    af_array outArray;
-
-    dim_t d0, d1, d2, d3;
-    af_get_dims(&d0, &d1, &d2, &d3, in);
-    af::dim4 idims(d0, d1, d2, d3);
-
-    dim_t nElems = 0;
-    af_get_elements(&nElems, in);
-
-    float *in_data = new float[nElems];
-    af_get_data_ptr(in_data, in);
-
-    T *out_data = new T[nElems];
-
-    for (int i = 0; i < (int)nElems; i++)
-        out_data[i] = (T)in_data[i];
-
-    af_create_array(&outArray, out_data, idims.ndims(), idims.get(), (af_dtype) af::dtype_traits<T>::af_type);
-
-    std::swap(*out, outArray);
-
-    delete [] in_data;
-    delete [] out_data;
-
-    return AF_SUCCESS;
-}
+af_err conv_image(af_array *out, af_array in);
 
 template<typename T>
-af::array cpu_randu(const af::dim4 dims)
-{
-    typedef typename af::dtype_traits<T>::base_type BT;
+af::array cpu_randu(const af::dim4 dims);
 
-    bool isTypeCplx = is_same_type<T, af::cfloat>::value || is_same_type<T, af::cdouble>::value;
-    bool isTypeFloat = is_same_type<BT, float>::value || is_same_type<BT, double>::value;
+void cleanSlate();
 
-    dim_t elements = (isTypeCplx ? 2 : 1) * dims.elements();
+//********** arrayfire custom test asserts ***********
 
-    std::vector<BT> out(elements);
-    for(int i = 0; i < (int)elements; i++) {
-        out[i] = isTypeFloat ? (BT)(rand())/RAND_MAX : rand() % 100;
-    }
+// Overloading unary + op is needed to make unsigned char values printable
+//  as numbers
+af_half abs(af_half in);
 
-    return af::array(dims, (T *)&out[0]);
-}
+af_half operator-(af_half lhs, af_half rhs);
 
+const af::cfloat &operator+(const af::cfloat &val);
+
+const af::cdouble &operator+(const af::cdouble &val);
+
+const af_half &operator+(const af_half &val);
+
+// Calculate a multi-dimensional coordinates' linearized index
+dim_t ravelIdx(af::dim4 coords, af::dim4 strides);
+
+// Calculate a linearized index's multi-dimensonal coordinates in an af::array,
+//  given its dimension sizes and strides
+af::dim4 unravelIdx(dim_t idx, af::dim4 dims, af::dim4 strides);
+
+af::dim4 unravelIdx(dim_t idx, af::array arr);
+
+af::dim4 calcStrides(const af::dim4 &parentDim);
+
+std::string minimalDim4(af::dim4 coords, af::dim4 dims);
+
+template<typename T>
+std::string printContext(const std::vector<T> &hGold, std::string goldName,
+                         const std::vector<T> &hOut, std::string outName,
+                         af::dim4 arrDims, af::dim4 arrStrides, dim_t idx);
+
+struct FloatTag {};
+struct IntegerTag {};
+
+template<typename T>
+::testing::AssertionResult elemWiseEq(std::string aName, std::string bName,
+                                      const std::vector<T> &a, af::dim4 aDims,
+                                      const std::vector<T> &b, af::dim4 bDims,
+                                      float maxAbsDiff, IntegerTag);
+
+template<typename T>
+::testing::AssertionResult elemWiseEq(std::string aName, std::string bName,
+                                      const std::vector<T> &a, af::dim4 aDims,
+                                      const std::vector<T> &b, af::dim4 bDims,
+                                      float maxAbsDiff, FloatTag);
+
+template<typename T>
+::testing::AssertionResult elemWiseEq(std::string aName, std::string bName,
+                                      const af::array &a, const af::array &b,
+                                      float maxAbsDiff);
+
+::testing::AssertionResult assertArrayEq(std::string aName, std::string bName,
+                                         const af::array &a, const af::array &b,
+                                         float maxAbsDiff = 0.f);
+
+// Called by ASSERT_VEC_ARRAY_EQ
+template<typename T>
+::testing::AssertionResult assertArrayEq(std::string aName,
+                                         std::string aDimsName,
+                                         std::string bName,
+                                         const std::vector<T> &hA,
+                                         af::dim4 aDims, const af::array &b,
+                                         float maxAbsDiff = 0.0f);
+
+// To support C API
+::testing::AssertionResult assertArrayEq(std::string aName, std::string bName,
+                                         const af_array a, const af_array b);
+
+// To support C API
+template<typename T>
+::testing::AssertionResult assertArrayEq(std::string hA_name,
+                                         std::string aDimsName,
+                                         std::string bName,
+                                         const std::vector<T> &hA,
+                                         af::dim4 aDims, const af_array b);
+
+// Called by ASSERT_ARRAYS_NEAR
+::testing::AssertionResult assertArrayNear(std::string aName, std::string bName,
+                                           std::string maxAbsDiffName,
+                                           const af::array &a,
+                                           const af::array &b,
+                                           float maxAbsDiff);
+
+::testing::AssertionResult assertImageNear(std::string aName, std::string bName,
+                                           std::string maxAbsDiffName,
+                                           const af_array &a, const af_array &b,
+                                           float maxAbsDiff);
+
+::testing::AssertionResult assertImageNear(std::string aName, std::string bName,
+                                           std::string maxAbsDiffName,
+                                           const af::array &a,
+                                           const af::array &b,
+                                           float maxAbsDiff);
+
+// Called by ASSERT_VEC_ARRAY_NEAR
+template<typename T>
+::testing::AssertionResult assertArrayNear(
+    std::string hA_name, std::string aDimsName, std::string bName,
+    std::string maxAbsDiffName, const std::vector<T> &hA, af::dim4 aDims,
+    const af::array &b, float maxAbsDiff);
+
+// To support C API
+::testing::AssertionResult assertArrayNear(std::string aName, std::string bName,
+                                           std::string maxAbsDiffName,
+                                           const af_array a, const af_array b,
+                                           float maxAbsDiff);
+
+// To support C API
+template<typename T>
+::testing::AssertionResult assertArrayNear(
+    std::string hA_name, std::string aDimsName, std::string bName,
+    std::string maxAbsDiffName, const std::vector<T> &hA, af::dim4 aDims,
+    const af_array b, float maxAbsDiff);
+
+::testing::AssertionResult assertRefEq(std::string hA_name,
+                                       std::string expected_name,
+                                       const af::array &a, int expected);
+
+/// Checks if the C-API arrayfire function returns successfully
+///
+/// \param[in] CALL This is the arrayfire C function
+#define ASSERT_SUCCESS(CALL) ASSERT_EQ(AF_SUCCESS, CALL)
+
+/// Compares two af::array or af_arrays for their types, dims, and values
+/// (strict equality).
+///
+/// \param[in] EXPECTED The expected array of the assertion
+/// \param[in] ACTUAL The actual resulting array from the calculation
+#define ASSERT_ARRAYS_EQ(EXPECTED, ACTUAL) \
+    ASSERT_PRED_FORMAT2(assertArrayEq, EXPECTED, ACTUAL)
+
+/// Same as ASSERT_ARRAYS_EQ, but for cases when a "special" output array is
+/// given to the function.
+/// The special array can be null, a full-sized array, a subarray, or reordered
+/// Can only be used for testing C-API functions currently
+///
+/// \param[in] EXPECTED The expected array of the assertion
+/// \param[in] ACTUAL The actual resulting array from the calculation
+#define ASSERT_SPECIAL_ARRAYS_EQ(EXPECTED, ACTUAL, META) \
+    ASSERT_PRED_FORMAT3(assertArrayEq, EXPECTED, ACTUAL, META)
+
+/// Compares a std::vector with an af::/af_array for their types, dims, and
+/// values (strict equality).
+///
+/// \param[in] EXPECTED_VEC The vector that represents the expected array
+/// \param[in] EXPECTED_ARR_DIMS The dimensions of the expected array
+/// \param[in] ACTUAL_ARR The actual resulting array from the calculation
+#define ASSERT_VEC_ARRAY_EQ(EXPECTED_VEC, EXPECTED_ARR_DIMS, ACTUAL_ARR) \
+    ASSERT_PRED_FORMAT3(assertArrayEq, EXPECTED_VEC, EXPECTED_ARR_DIMS,  \
+                        ACTUAL_ARR)
+
+/// Compares two af::array or af_arrays for their types, dims, and values
+/// (strict equality).
+///
+/// \param[in] EXPECTED The expected array of the assertion
+/// \param[in] ACTUAL The actual resulting array from the calculation
+#define EXPECT_ARRAYS_EQ(EXPECTED, ACTUAL) \
+    EXPECT_PRED_FORMAT2(assertArrayEq, EXPECTED, ACTUAL)
+
+/// Same as EXPECT_ARRAYS_EQ, but for cases when a "special" output array is
+/// given to the function.
+/// The special array can be null, a full-sized array, a subarray, or reordered
+/// Can only be used for testing C-API functions currently
+///
+/// \param[in] EXPECTED The expected array of the assertion
+/// \param[in] ACTUAL The actual resulting array from the calculation
+#define EXPECT_SPECIAL_ARRAYS_EQ(EXPECTED, ACTUAL, META) \
+    EXPECT_PRED_FORMAT3(assertArrayEq, EXPECTED, ACTUAL, META)
+
+/// Compares a std::vector with an af::/af_array for their types, dims, and
+/// values (strict equality).
+///
+/// \param[in] EXPECTED_VEC The vector that represents the expected array
+/// \param[in] EXPECTED_ARR_DIMS The dimensions of the expected array
+/// \param[in] ACTUAL_ARR The actual resulting array from the calculation
+#define EXPECT_VEC_ARRAY_EQ(EXPECTED_VEC, EXPECTED_ARR_DIMS, ACTUAL_ARR) \
+    EXPECT_PRED_FORMAT3(assertArrayEq, EXPECTED_VEC, EXPECTED_ARR_DIMS,  \
+                        ACTUAL_ARR)
+
+/// Compares two af::array or af_arrays for their type, dims, and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED Expected value of the assertion
+/// \param[in] ACTUAL Actual value of the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+///
+/// \NOTE: This macro will deallocate the af_arrays after the call
+#define ASSERT_ARRAYS_NEAR(EXPECTED, ACTUAL, MAX_ABSDIFF) \
+    ASSERT_PRED_FORMAT3(assertArrayNear, EXPECTED, ACTUAL, MAX_ABSDIFF)
+
+/// Compares two af::array or af_arrays for their type, dims, and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED Expected value of the assertion
+/// \param[in] ACTUAL Actual value of the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+///
+/// \NOTE: This macro will deallocate the af_arrays after the call
+#define ASSERT_IMAGES_NEAR(EXPECTED, ACTUAL, MAX_ABSDIFF) \
+    ASSERT_PRED_FORMAT3(assertImageNear, EXPECTED, ACTUAL, MAX_ABSDIFF)
+
+/// Compares a std::vector with an af::array for their dims and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED_VEC The vector that represents the expected array
+/// \param[in] EXPECTED_ARR_DIMS The dimensions of the expected array
+/// \param[in] ACTUAL_ARR The actual array from the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+#define ASSERT_VEC_ARRAY_NEAR(EXPECTED_VEC, EXPECTED_ARR_DIMS, ACTUAL_ARR, \
+                              MAX_ABSDIFF)                                 \
+    ASSERT_PRED_FORMAT4(assertArrayNear, EXPECTED_VEC, EXPECTED_ARR_DIMS,  \
+                        ACTUAL_ARR, MAX_ABSDIFF)
+
+/// Compares two af::array or af_arrays for their type, dims, and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED Expected value of the assertion
+/// \param[in] ACTUAL Actual value of the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+///
+/// \NOTE: This macro will deallocate the af_arrays after the call
+#define EXPECT_ARRAYS_NEAR(EXPECTED, ACTUAL, MAX_ABSDIFF) \
+    EXPECT_PRED_FORMAT3(assertArrayNear, EXPECTED, ACTUAL, MAX_ABSDIFF)
+
+/// Compares two af::array or af_arrays for their type, dims, and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED Expected value of the assertion
+/// \param[in] ACTUAL Actual value of the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+///
+/// \NOTE: This macro will deallocate the af_arrays after the call
+#define EXPECT_IMAGES_NEAR(EXPECTED, ACTUAL, MAX_ABSDIFF) \
+    EXPECT_PRED_FORMAT3(assertImageNear, EXPECTED, ACTUAL, MAX_ABSDIFF)
+
+/// Compares a std::vector with an af::array for their dims and values (with a
+/// given tolerance).
+///
+/// \param[in] EXPECTED_VEC The vector that represents the expected array
+/// \param[in] EXPECTED_ARR_DIMS The dimensions of the expected array
+/// \param[in] ACTUAL_ARR The actual array from the calculation
+/// \param[in] MAX_ABSDIFF Expected maximum absolute difference between
+///            elements of EXPECTED and ACTUAL
+#define EXPECT_VEC_ARRAY_NEAR(EXPECTED_VEC, EXPECTED_ARR_DIMS, ACTUAL_ARR, \
+                              MAX_ABSDIFF)                                 \
+    EXPECT_PRED_FORMAT4(assertArrayNear, EXPECTED_VEC, EXPECTED_ARR_DIMS,  \
+                        ACTUAL_ARR, MAX_ABSDIFF)
+
+#define ASSERT_REF(arr, expected) \
+    ASSERT_PRED_FORMAT2(assertRefEq, arr, expected)
+
+#if defined(USE_MTX)
+::testing::AssertionResult mtxReadSparseMatrix(af::array &out,
+                                               const char *fileName);
+#endif  // USE_MTX
+
+enum TestOutputArrayType {
+    // Test af_* function when given a null array as its output
+    NULL_ARRAY,
+
+    // Test af_* function when given an output array that is the same size as
+    // the expected output
+    FULL_ARRAY,
+
+    // Test af_* function when given an output array that is a sub-array of a
+    // larger array (the sub-array size is still the same size as the expected
+    // output). Only the sub-array must be modified by the af_* function
+    SUB_ARRAY,
+
+    // Test af_* function when given an output array that was previously
+    // reordered (but after the reorder, has still the same shape as the
+    // expected
+    // output). This specifically uses the reorder behavior when dim0 is kept,
+    // and thus no data movement is done - only the dims and strides are
+    // modified
+    REORDERED_ARRAY
+};
+
+class TestOutputArrayInfo {
+    af_array out_arr;
+    af_array out_arr_cpy;
+    af_array out_subarr;
+    dim_t out_subarr_ndims;
+    af_seq out_subarr_idxs[4];
+    TestOutputArrayType out_arr_type;
+
+   public:
+    TestOutputArrayInfo();
+
+    TestOutputArrayInfo(TestOutputArrayType arr_type);
+
+    ~TestOutputArrayInfo();
+
+    void init(const unsigned ndims, const dim_t *const dims, const af_dtype ty);
+
+    void init(const unsigned ndims, const dim_t *const dims, const af_dtype ty,
+              const af_seq *const subarr_idxs);
+
+    void init(double val, const unsigned ndims, const dim_t *const dims,
+              const af_dtype ty);
+
+    void init(double val, const unsigned ndims, const dim_t *const dims,
+              const af_dtype ty, const af_seq *const subarr_idxs);
+
+    af_array getOutput();
+
+    void setOutput(af_array array);
+
+    af_array getFullOutput();
+    af_array getFullOutputCopy();
+    af_seq *getSubArrayIdxs();
+    dim_t getSubArrayNumDims();
+    TestOutputArrayType getOutputArrayType();
+};
+
+// Generates a random array. testWriteToOutputArray expects that it will receive
+// the same af_array that this generates after the af_* function is called
+void genRegularArray(TestOutputArrayInfo *metadata, const unsigned ndims,
+                     const dim_t *const dims, const af_dtype ty);
+
+void genRegularArray(TestOutputArrayInfo *metadata, double val,
+                     const unsigned ndims, const dim_t *const dims,
+                     const af_dtype ty);
+
+// Generates a large, random array, and extracts a subarray for the af_*
+// function to use. testWriteToOutputArray expects that the large array that it
+// receives is equal to the same large array with the gold array injected on the
+// same subarray location
+void genSubArray(TestOutputArrayInfo *metadata, const unsigned ndims,
+                 const dim_t *const dims, const af_dtype ty);
+
+void genSubArray(TestOutputArrayInfo *metadata, double val,
+                 const unsigned ndims, const dim_t *const dims,
+                 const af_dtype ty);
+
+// Generates a reordered array. testWriteToOutputArray expects that this array
+// will still have the correct output values from the af_* function, even though
+// the array was initially reordered.
+void genReorderedArray(TestOutputArrayInfo *metadata, const unsigned ndims,
+                       const dim_t *const dims, const af_dtype ty);
+
+void genReorderedArray(TestOutputArrayInfo *metadata, double val,
+                       const unsigned ndims, const dim_t *const dims,
+                       const af_dtype ty);
+// Partner function of testWriteToOutputArray. This generates the "special"
+// array that testWriteToOutputArray will use to check if the af_* function
+// correctly uses an existing array as its output
+void genTestOutputArray(af_array *out_ptr, const unsigned ndims,
+                        const dim_t *const dims, const af_dtype ty,
+                        TestOutputArrayInfo *metadata);
+
+void genTestOutputArray(af_array *out_ptr, double val, const unsigned ndims,
+                        const dim_t *const dims, const af_dtype ty,
+                        TestOutputArrayInfo *metadata);
+
+// Partner function of genTestOutputArray. This uses the same "special"
+// array that genTestOutputArray generates, and checks whether the
+// af_* function wrote to that array correctly
+::testing::AssertionResult testWriteToOutputArray(
+    std::string gold_name, std::string result_name, const af_array gold,
+    const af_array out, TestOutputArrayInfo *metadata);
+
+// Called by ASSERT_SPECIAL_ARRAYS_EQ
+::testing::AssertionResult assertArrayEq(std::string aName, std::string bName,
+                                         std::string metadataName,
+                                         const af_array a, const af_array b,
+                                         TestOutputArrayInfo *metadata);
+
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif

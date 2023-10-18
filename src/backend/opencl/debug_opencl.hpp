@@ -8,18 +8,18 @@
  ********************************************************/
 
 #pragma once
-#include <err_opencl.hpp>
-#include <stdio.h>
-#include <errorcodes.hpp>
+
+#include <platform.hpp>
 
 #ifndef NDEBUG
-#include <iostream>
+
 #define CL_DEBUG_FINISH(Q) Q.finish()
+
 #else
-#define CL_DEBUG_FINISH(Q)                      \
-    do {                                        \
-        if(synchronize_calls()) {               \
-            Q.finish();                         \
-        }                                       \
-    } while (false); 
+
+#define CL_DEBUG_FINISH(Q)                               \
+    do {                                                 \
+        if (opencl::synchronize_calls()) { Q.finish(); } \
+    } while (false);
+
 #endif

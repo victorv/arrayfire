@@ -7,219 +7,204 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <backend.hpp>
-#include <dispatch.hpp>
-#include <backend.hpp>
+#pragma once
+
 #include <Param.hpp>
+#include <backend.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
+#include <dims_param.hpp>
+#include <nvrtc_kernel_headers/copy_cuh.hpp>
+#include <nvrtc_kernel_headers/memcopy_cuh.hpp>
+#include <threadsMgt.hpp>
 
-namespace cuda
-{
-namespace kernel
-{
+#include <algorithm>
 
-    typedef struct
-    {
-        int dim[4];
-    } dims_t;
+namespace arrayfire {
+namespace cuda {
+namespace kernel {
 
-    static const uint DIMX = 32;
-    static const uint DIMY =  8;
-
-    template<typename T>
-    __global__ static void
-    memcopy_kernel(T *out, const dims_t ostrides,
-                   const T *in, const dims_t idims,
-                   const dims_t istrides, uint blocks_x, uint blocks_y)
-    {
-        const int tidx = threadIdx.x;
-        const int tidy = threadIdx.y;
-
-        const int zid = blockIdx.x / blocks_x;
-        const int wid = blockIdx.y / blocks_y;
-        const int blockIdx_x = blockIdx.x - (blocks_x) * zid;
-        const int blockIdx_y = blockIdx.y - (blocks_y) * wid;
-        const int xid = blockIdx_x * blockDim.x + tidx;
-        const int yid = blockIdx_y * blockDim.y + tidy;
-
-        // FIXME: Do more work per block
-        out += wid * ostrides.dim[3] + zid * ostrides.dim[2] + yid * ostrides.dim[1];
-        in  += wid * istrides.dim[3] + zid * istrides.dim[2] + yid * istrides.dim[1];
-
-        int istride0 = istrides.dim[0];
-        if (xid < idims.dim[0] &&
-            yid < idims.dim[1] &&
-            zid < idims.dim[2] &&
-            wid < idims.dim[3]) {
-            out[xid] = in[xid * istride0];
+// Increase vectorization by increasing the used type up to maxVectorWidth.
+// Example:
+//  input array<int> with return value = 4, means that the array became
+//  array<int4>.
+//
+// Parameters
+//  - IN     maxVectorWidth: maximum vectorisation desired
+//  - IN/OUT dims[4]: dimensions of the array
+//  - IN/OUT istrides[4]: strides of the input array
+//  - IN/OUT indims: ndims of the input array.  Updates when dim[0] becomes 1
+//  - IN/OUT ioffset: offset of the input array
+//  - IN/OUT ostrides[4]: strides of the output array
+//  - IN/OUT ooffset: offset of the output array
+//
+// Returns
+//  - maximum obtained vectorization.
+//  - All the parameters are updated accordingly
+//
+template<typename T>
+dim_t vectorizeShape(const dim_t maxVectorWidth, Param<T> &out, dim_t &indims,
+                     CParam<T> &in) {
+    dim_t vectorWidth{1};
+    if ((maxVectorWidth != 1) & (in.strides[0] == 1) & (out.strides[0] == 1)) {
+        // Only adjacent items can be grouped into a base vector type
+        void *in_ptr{(void *)in.ptr};
+        void *out_ptr{(void *)out.ptr};
+        // - global is the OR of the values to be checked.  When global is
+        // divisable by 2, than all source values are also
+        dim_t global{in.dims[0]};
+        for (int i{1}; i < indims; ++i) {
+            global |= in.strides[i] | out.strides[i];
         }
-
-    }
-
-    template<typename T>
-    void memcopy(T *out, const dim_t *ostrides,
-                 const T *in, const dim_t *idims,
-                 const dim_t *istrides, uint ndims)
-    {
-        dim3 threads(DIMX, DIMY);
-
-        if (ndims == 1) {
-            threads.x *= threads.y;
-            threads.y  = 1;
-       }
-
-        // FIXME: DO more work per block
-        uint blocks_x = divup(idims[0], threads.x);
-        uint blocks_y = divup(idims[1], threads.y);
-
-        dim3 blocks(blocks_x * idims[2],
-                    blocks_y * idims[3]);
-
-        dims_t _ostrides = {{ostrides[0], ostrides[1], ostrides[2], ostrides[3]}};
-        dims_t _istrides = {{istrides[0], istrides[1], istrides[2], istrides[3]}};
-        dims_t _idims = {{idims[0], idims[1], idims[2], idims[3]}};
-
-        CUDA_LAUNCH((memcopy_kernel<T>), blocks, threads,
-                out, _ostrides, in, _idims, _istrides, blocks_x, blocks_y);
-        POST_LAUNCH_CHECK();
-    }
-
-
-    ////////////////////////////// BEGIN - templated help functions for copy_kernel ////////////////////////////////
-    template<typename T>
-    __inline__ __device__ static
-    T scale(T value, double factor) {
-        return (T)(value*factor);
-    }
-
-    template<>
-    __inline__ __device__
-    cfloat scale<cfloat>(cfloat value, double factor) {
-        return make_cuFloatComplex(value.x*factor, value.y*factor);
-    }
-
-    template<>
-    __inline__ __device__
-    cdouble scale<cdouble>(cdouble value, double factor) {
-        return make_cuDoubleComplex(value.x*factor, value.y*factor);
-    }
-
-    template<typename inType, typename outType>
-    __inline__ __device__
-    outType convertType(inType value) {
-        return (outType)value;
-    }
-
-    template<>
-    __inline__ __device__
-    cdouble convertType<cfloat, cdouble>(cfloat value) {
-        return cuComplexFloatToDouble(value);
-    }
-
-    template<>
-    __inline__ __device__
-    cfloat convertType<cdouble, cfloat>(cdouble value) {
-        return cuComplexDoubleToFloat(value);
-    }
-
-#define OTHER_SPECIALIZATIONS(IN_T)                     \
-    template<>                                          \
-    __inline__ __device__                               \
-    cfloat convertType<IN_T, cfloat>(IN_T value) {      \
-        return make_cuFloatComplex(value, 0.0f);        \
-    }                                                   \
-                                                        \
-    template<>                                          \
-    __inline__ __device__                               \
-    cdouble convertType<IN_T, cdouble>(IN_T value) {    \
-        return make_cuDoubleComplex(value, 0.0);        \
-    }
-
-    OTHER_SPECIALIZATIONS(float )
-    OTHER_SPECIALIZATIONS(double)
-    OTHER_SPECIALIZATIONS(int   )
-    OTHER_SPECIALIZATIONS(uint  )
-    OTHER_SPECIALIZATIONS(intl   )
-    OTHER_SPECIALIZATIONS(uintl  )
-    OTHER_SPECIALIZATIONS(short  )
-    OTHER_SPECIALIZATIONS(ushort )
-    OTHER_SPECIALIZATIONS(uchar )
-    OTHER_SPECIALIZATIONS(char  )
-    ////////////////////////////// END - templated help functions for copy_kernel //////////////////////////////////
-
-
-    template<typename inType, typename outType, bool same_dims>
-    __global__ static void
-    copy_kernel(Param<outType> dst, CParam<inType> src, outType default_value,
-                double factor, const dims_t trgt, uint blk_x, uint blk_y)
-    {
-        const uint lx = threadIdx.x;
-        const uint ly = threadIdx.y;
-
-        const uint gz = blockIdx.x / blk_x;
-        const uint gw = blockIdx.y / blk_y;
-        const uint blockIdx_x = blockIdx.x - (blk_x) * gz;
-        const uint blockIdx_y = blockIdx.y - (blk_y) * gw;
-        const uint gx = blockIdx_x * blockDim.x + lx;
-        const uint gy = blockIdx_y * blockDim.y + ly;
-
-        const inType * in = src.ptr + (gw * src.strides[3] + gz * src.strides[2] + gy * src.strides[1]);
-        outType * out     = dst.ptr + (gw * dst.strides[3] + gz * dst.strides[2] + gy * dst.strides[1]);
-
-        int istride0 = src.strides[0];
-        int ostride0 = dst.strides[0];
-
-        if (gy < dst.dims[1] && gz < dst.dims[2] && gw < dst.dims[3]) {
-            int loop_offset = blockDim.x * blk_x;
-            bool cond = gy < trgt.dim[1] && gz < trgt.dim[2] && gw < trgt.dim[3];
-            for(int rep=gx; rep<dst.dims[0]; rep+=loop_offset) {
-                outType temp = default_value;
-                if (same_dims || (rep < trgt.dim[0] && cond)) {
-                    temp = convertType<inType, outType>(scale<inType>(in[rep * istride0], factor));
+        // - The buffers are always aligned at 128 Bytes.  The pointers in the
+        // Param<T> structure are however, direct pointers (including the
+        // offset), so the final pointer has to be chedked on alignment
+        size_t filler{64};  // give enough space for the align to move
+        unsigned count{0};
+        while (((global & 1) == 0) & (vectorWidth < maxVectorWidth) &&
+               (in.ptr ==
+                std::align(alignof(T) * vectorWidth * 2, 1, in_ptr, filler)) &&
+               (out.ptr ==
+                std::align(alignof(T) * vectorWidth * 2, 1, out_ptr, filler))) {
+            ++count;
+            vectorWidth <<= 1;
+            global >>= 1;
+        }
+        if (count != 0) {
+            // update the dimensions, to compensate for the vector base
+            // type change
+            in.dims[0] >>= count;
+            for (int i{1}; i < indims; ++i) {
+                in.strides[i] >>= count;
+                out.strides[i] >>= count;
+            }
+            if (in.dims[0] == 1) {
+                // Vectorization has absorbed the full dim0, so eliminate
+                // this dimension
+                --indims;
+                for (int i{0}; i < indims; ++i) {
+                    in.dims[i]     = in.dims[i + 1];
+                    in.strides[i]  = in.strides[i + 1];
+                    out.strides[i] = out.strides[i + 1];
                 }
-                out[rep*ostride0] = temp;
+                in.dims[indims] = 1;
             }
         }
     }
+    return vectorWidth;
+}
 
-    template<typename inType, typename outType>
-    void copy(Param<outType> dst, CParam<inType> src, int ndims, outType default_value, double factor)
-    {
-        dim3 threads(DIMX, DIMY);
-        size_t local_size[] = {DIMX, DIMY};
+template<typename T>
+void memcopy(Param<T> out, CParam<T> in, dim_t indims) {
+    const size_t totalSize{in.elements() * sizeof(T) * 2};
+    removeEmptyColumns(in.dims, indims, out.strides);
+    indims = removeEmptyColumns(in.dims, indims, in.dims, in.strides);
+    indims = combineColumns(in.dims, in.strides, indims, out.strides);
 
-        //FIXME: Why isn't threads being updated??
-        local_size[0] *= local_size[1];
-        if (ndims == 1) {
-            local_size[1] = 1;
-        }
+    // Optimization memory access and caching.
+    // Best performance is achieved with the highest vectorization
+    // (<int> --> <int2>,<int4>, ...), since more data is processed per IO.
 
-        uint blk_x = divup(dst.dims[0], local_size[0]);
-        uint blk_y = divup(dst.dims[1], local_size[1]);
+    // 16 Bytes gives best performance (=cdouble)
+    const dim_t maxVectorWidth{sizeof(T) > 8 ? 1 : 16 / sizeof(T)};
+    const dim_t vectorWidth{vectorizeShape(maxVectorWidth, out, indims, in)};
+    const size_t sizeofNewT{sizeof(T) * vectorWidth};
 
-        dim3 blocks(blk_x * dst.dims[2],
-                    blk_y * dst.dims[3]);
+    threadsMgt<dim_t> th(in.dims, indims);
+    const dim3 threads{th.genThreads()};
+    const dim3 blocks{th.genBlocks(threads, 1, 1, totalSize, sizeofNewT)};
 
-        int trgt_l  = std::min(dst.dims[3], src.dims[3]);
-        int trgt_k  = std::min(dst.dims[2], src.dims[2]);
-        int trgt_j  = std::min(dst.dims[1], src.dims[1]);
-        int trgt_i  = std::min(dst.dims[0], src.dims[0]);
-        dims_t trgt_dims = {{trgt_i, trgt_j, trgt_k, trgt_l}};
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
 
-        bool same_dims = ( (src.dims[0]==dst.dims[0]) &&
-                           (src.dims[1]==dst.dims[1]) &&
-                           (src.dims[2]==dst.dims[2]) &&
-                           (src.dims[3]==dst.dims[3]) );
+    // select the kernel with the necessary loopings
+    const char *kernelName{th.loop0   ? "arrayfire::cuda::memCopyLoop0"
+                           : th.loop2 ? "arrayfire::cuda::memCopyLoop123"
+                           : th.loop1 ? th.loop3
+                                            ? "arrayfire::cuda::memCopyLoop13"
+                                            : "arrayfire::cuda::memCopyLoop1"
+                           : th.loop3 ? "arrayfire::cuda::memCopyLoop3"
+                                      : "arrayfire::cuda::memCopy"};
 
-        if (same_dims)
-            CUDA_LAUNCH((copy_kernel<inType, outType, true >), blocks, threads,
-                    dst, src, default_value, factor, trgt_dims, blk_x, blk_y);
-        else
-            CUDA_LAUNCH((copy_kernel<inType, outType, false>), blocks, threads,
-                    dst, src, default_value, factor, trgt_dims, blk_x, blk_y);
-
-        POST_LAUNCH_CHECK();
+    // Conversion to cuda base vector types.
+    switch (sizeofNewT) {
+        case 1: {
+            auto memCopy{common::getKernel(kernelName, {{memcopy_cuh_src}},
+                                           TemplateArgs(TemplateArg("char")))};
+            memCopy(qArgs, Param<char>((char *)out.ptr, out.dims, out.strides),
+                    CParam<char>((const char *)in.ptr, in.dims, in.strides));
+        } break;
+        case 2: {
+            auto memCopy{common::getKernel(kernelName, {{memcopy_cuh_src}},
+                                           TemplateArgs(TemplateArg("short")))};
+            memCopy(qArgs,
+                    Param<short>((short *)out.ptr, out.dims, out.strides),
+                    CParam<short>((const short *)in.ptr, in.dims, in.strides));
+        } break;
+        case 4: {
+            auto memCopy{common::getKernel(kernelName, {{memcopy_cuh_src}},
+                                           TemplateArgs(TemplateArg("float")))};
+            memCopy(qArgs,
+                    Param<float>((float *)out.ptr, out.dims, out.strides),
+                    CParam<float>((const float *)in.ptr, in.dims, in.strides));
+        } break;
+        case 8: {
+            auto memCopy{
+                common::getKernel(kernelName, {{memcopy_cuh_src}},
+                                  TemplateArgs(TemplateArg("float2")))};
+            memCopy(
+                qArgs, Param<float2>((float2 *)out.ptr, out.dims, out.strides),
+                CParam<float2>((const float2 *)in.ptr, in.dims, in.strides));
+        } break;
+        case 16: {
+            auto memCopy{
+                common::getKernel(kernelName, {{memcopy_cuh_src}},
+                                  TemplateArgs(TemplateArg("float4")))};
+            memCopy(
+                qArgs, Param<float4>((float4 *)out.ptr, out.dims, out.strides),
+                CParam<float4>((const float4 *)in.ptr, in.dims, in.strides));
+        } break;
+        default: assert("type is larger than 16 bytes, which is unsupported");
     }
+    POST_LAUNCH_CHECK();
+}
 
+template<typename inType, typename outType>
+void copy(Param<outType> dst, CParam<inType> src, dim_t ondims,
+          outType default_value, double factor) {
+    const size_t totalSize{dst.elements() * sizeof(outType) +
+                           src.elements() * sizeof(inType)};
+    bool same_dims{true};
+    for (dim_t i{0}; i < ondims; ++i) {
+        if (src.dims[i] > dst.dims[i]) {
+            src.dims[i] = dst.dims[i];
+        } else if (src.dims[i] != dst.dims[i]) {
+            same_dims = false;
+        }
+    }
+    removeEmptyColumns(dst.dims, ondims, src.dims, src.strides);
+    ondims = removeEmptyColumns(dst.dims, ondims, dst.dims, dst.strides);
+    ondims =
+        combineColumns(dst.dims, dst.strides, ondims, src.dims, src.strides);
+
+    threadsMgt<dim_t> th(dst.dims, ondims);
+    const dim3 threads{th.genThreads()};
+    const dim3 blocks{th.genBlocks(threads, 1, 1, totalSize, sizeof(outType))};
+
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
+
+    auto copy{common::getKernel(
+        th.loop0                 ? "arrayfire::cuda::scaledCopyLoop0"
+        : (th.loop2 || th.loop3) ? "arrayfire::cuda::scaledCopyLoop123"
+        : th.loop1               ? "arrayfire::cuda::scaledCopyLoop1"
+                                 : "arrayfire::cuda::scaledCopy",
+        {{copy_cuh_src}},
+        TemplateArgs(TemplateTypename<inType>(), TemplateTypename<outType>(),
+                     TemplateArg(same_dims), TemplateArg(factor != 1.0)))};
+
+    copy(qArgs, dst, src, default_value, factor);
+
+    POST_LAUNCH_CHECK();
 }
-}
+}  // namespace kernel
+}  // namespace cuda
+}  // namespace arrayfire

@@ -7,43 +7,43 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined(WITH_OPENCL_LINEAR_ALGEBRA)
+#if defined(WITH_LINEAR_ALGEBRA)
+#include <copy.hpp>
 #include <cpu/cpu_helper.hpp>
 #include <cpu/cpu_lu.hpp>
 #include <math.hpp>
-#include <copy.hpp>
 #include <range.hpp>
 
-namespace opencl
-{
-namespace cpu
-{
+#include <numeric>
+
+namespace arrayfire {
+namespace opencl {
+namespace cpu {
 
 template<typename T>
-using getrf_func_def = int (*)(ORDER_TYPE, int, int,
-                               T*, int,
-                               int*);
+using getrf_func_def = int (*)(ORDER_TYPE, int, int, T *, int, int *);
 
-#define LU_FUNC_DEF( FUNC )                                     \
-template<typename T> FUNC##_func_def<T> FUNC##_func();
+#define LU_FUNC_DEF(FUNC) \
+    template<typename T>  \
+    FUNC##_func_def<T> FUNC##_func();
 
+#define LU_FUNC(FUNC, TYPE, PREFIX)             \
+    template<>                                  \
+    FUNC##_func_def<TYPE> FUNC##_func<TYPE>() { \
+        return &LAPACK_NAME(PREFIX##FUNC);      \
+    }
 
-#define LU_FUNC( FUNC, TYPE, PREFIX )                           \
-template<> FUNC##_func_def<TYPE>     FUNC##_func<TYPE>()        \
-{ return & LAPACK_NAME(PREFIX##FUNC); }
-
-LU_FUNC_DEF( getrf )
-LU_FUNC(getrf , float  , s)
-LU_FUNC(getrf , double , d)
-LU_FUNC(getrf , cfloat , c)
-LU_FUNC(getrf , cdouble, z)
+LU_FUNC_DEF(getrf)
+LU_FUNC(getrf, float, s)
+LU_FUNC(getrf, double, d)
+LU_FUNC(getrf, cfloat, c)
+LU_FUNC(getrf, cdouble, z)
 
 template<typename T>
-void lu_split(Array<T> &lower, Array<T> &upper, const Array<T> &in)
-{
-    std::shared_ptr<T> ls = lower.getMappedPtr();
-    std::shared_ptr<T> us = upper.getMappedPtr();
-    std::shared_ptr<T> is = in.getMappedPtr();
+void lu_split(Array<T> &lower, Array<T> &upper, const Array<T> &in) {
+    mapped_ptr<T> ls = lower.getMappedPtr();
+    mapped_ptr<T> us = upper.getMappedPtr();
+    mapped_ptr<T> is = in.getMappedPtr(CL_MAP_READ);
 
     T *l = ls.get();
     T *u = us.get();
@@ -57,40 +57,34 @@ void lu_split(Array<T> &lower, Array<T> &upper, const Array<T> &in)
     dim4 ust = upper.strides();
     dim4 ist = in.strides();
 
-    for(dim_t ow = 0; ow < idm[3]; ow++) {
+    for (dim_t ow = 0; ow < idm[3]; ow++) {
         const dim_t lW = ow * lst[3];
         const dim_t uW = ow * ust[3];
         const dim_t iW = ow * ist[3];
 
-        for(dim_t oz = 0; oz < idm[2]; oz++) {
+        for (dim_t oz = 0; oz < idm[2]; oz++) {
             const dim_t lZW = lW + oz * lst[2];
             const dim_t uZW = uW + oz * ust[2];
             const dim_t iZW = iW + oz * ist[2];
 
-            for(dim_t oy = 0; oy < idm[1]; oy++) {
+            for (dim_t oy = 0; oy < idm[1]; oy++) {
                 const dim_t lYZW = lZW + oy * lst[1];
                 const dim_t uYZW = uZW + oy * ust[1];
                 const dim_t iYZW = iZW + oy * ist[1];
 
-                for(dim_t ox = 0; ox < idm[0]; ox++) {
+                for (dim_t ox = 0; ox < idm[0]; ox++) {
                     const dim_t lMem = lYZW + ox;
                     const dim_t uMem = uYZW + ox;
                     const dim_t iMem = iYZW + ox;
-                    if(ox > oy) {
-                        if(oy < ldm[1])
-                            l[lMem] = i[iMem];
-                        if(ox < udm[0])
-                            u[uMem] = scalar<T>(0);
+                    if (ox > oy) {
+                        if (oy < ldm[1]) { l[lMem] = i[iMem]; }
+                        if (ox < udm[0]) { u[uMem] = scalar<T>(0); }
                     } else if (oy > ox) {
-                        if(oy < ldm[1])
-                            l[lMem] = scalar<T>(0);
-                        if(ox < udm[0])
-                            u[uMem] = i[iMem];
-                    } else if(ox == oy) {
-                        if(oy < ldm[1])
-                            l[lMem] = scalar<T>(1.0);
-                        if(ox < udm[0])
-                            u[uMem] = i[iMem];
+                        if (oy < ldm[1]) { l[lMem] = scalar<T>(0); }
+                        if (ox < udm[0]) { u[uMem] = i[iMem]; }
+                    } else if (ox == oy) {
+                        if (oy < ldm[1]) { l[lMem] = scalar<T>(1.0); }
+                        if (ox < udm[0]) { u[uMem] = i[iMem]; }
                     }
                 }
             }
@@ -98,38 +92,27 @@ void lu_split(Array<T> &lower, Array<T> &upper, const Array<T> &in)
     }
 }
 
-void convertPivot(Array<int> &pivot, int out_sz)
-{
-    Array<int> p = range<int>(dim4(out_sz), 0); // Runs opencl
+void convertPivot(int *pivot, int out_sz, size_t pivot_dim) {
+    std::vector<int> p(out_sz);
+    iota(begin(p), end(p), 0);
 
-    std::shared_ptr<int> pi = pivot.getMappedPtr();
-    std::shared_ptr<int> po = p.getMappedPtr();
-
-    int *d_pi = pi.get();
-    int *d_po = po.get();
-
-    dim_t d0 = pivot.dims()[0];
-
-    for(int j = 0; j < (int)d0; j++) {
+    for (int j = 0; j < static_cast<int>(pivot_dim); j++) {
         // 1 indexed in pivot
-        std::swap(d_po[j], d_po[d_pi[j] - 1]);
+        std::swap(p[j], p[pivot[j] - 1]);
     }
 
-    pi.reset();
-    po.reset();
-
-    pivot = p;
+    copy(begin(p), end(p), pivot);
 }
 
 template<typename T>
-void lu(Array<T> &lower, Array<T> &upper, Array<int> &pivot, const Array<T> &in)
-{
+void lu(Array<T> &lower, Array<T> &upper, Array<int> &pivot,
+        const Array<T> &in) {
     dim4 iDims = in.dims();
-    int M = iDims[0];
-    int N = iDims[1];
+    int M      = iDims[0];
+    int N      = iDims[1];
 
     Array<T> in_copy = copyArray<T>(in);
-    pivot = lu_inplace(in_copy);
+    pivot            = lu_inplace(in_copy);
 
     // SPLIT into lower and upper
     dim4 ldims(M, min(M, N));
@@ -141,38 +124,38 @@ void lu(Array<T> &lower, Array<T> &upper, Array<int> &pivot, const Array<T> &in)
 }
 
 template<typename T>
-Array<int> lu_inplace(Array<T> &in, const bool convert_pivot)
-{
+Array<int> lu_inplace(Array<T> &in, const bool convert_pivot) {
     dim4 iDims = in.dims();
-    int M = iDims[0];
-    int N = iDims[1];
+    int M      = iDims[0];
+    int N      = iDims[1];
 
-    Array<int> pivot = createEmptyArray<int>(af::dim4(min(M, N), 1, 1, 1));
+    int pivot_dim    = min(M, N);
+    Array<int> pivot = createEmptyArray<int>(af::dim4(pivot_dim, 1, 1, 1));
+    if (convert_pivot) { pivot = range<int>(af::dim4(M, 1, 1, 1)); }
 
-    std::shared_ptr<T>   inPtr = in.getMappedPtr();
-    std::shared_ptr<int> piPtr = pivot.getMappedPtr();
+    mapped_ptr<T> inPtr   = in.getMappedPtr();
+    mapped_ptr<int> piPtr = pivot.getMappedPtr();
 
-    getrf_func<T>()(AF_LAPACK_COL_MAJOR, M, N,
-                    inPtr.get(), in.strides()[1],
+    getrf_func<T>()(AF_LAPACK_COL_MAJOR, M, N, inPtr.get(), in.strides()[1],
                     piPtr.get());
 
-    inPtr.reset();
-    piPtr.reset();
-
-    if(convert_pivot) convertPivot(pivot, M);
+    if (convert_pivot) { convertPivot(piPtr.get(), M, min(M, N)); }
 
     return pivot;
 }
 
-#define INSTANTIATE_LU(T)                                                                           \
-    template Array<int> lu_inplace<T>(Array<T> &in, const bool convert_pivot);                      \
-    template void lu<T>(Array<T> &lower, Array<T> &upper, Array<int> &pivot, const Array<T> &in);
+#define INSTANTIATE_LU(T)                                        \
+    template Array<int> lu_inplace<T>(Array<T> & in,             \
+                                      const bool convert_pivot); \
+    template void lu<T>(Array<T> & lower, Array<T> & upper,      \
+                        Array<int> & pivot, const Array<T> &in);
 
 INSTANTIATE_LU(float)
 INSTANTIATE_LU(cfloat)
 INSTANTIATE_LU(double)
 INSTANTIATE_LU(cdouble)
 
-}
-}
-#endif
+}  // namespace cpu
+}  // namespace opencl
+}  // namespace arrayfire
+#endif  // WITH_LINEAR_ALGEBRA

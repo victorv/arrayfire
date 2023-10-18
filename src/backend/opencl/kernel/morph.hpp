@@ -8,178 +8,141 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/morph.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/Binary.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/morph.hpp>
 #include <memory.hpp>
-#include <ops.hpp>
-#include <type_util.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::LocalSpaceArg;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace kernel
-{
+template<typename T>
+void morph(Param out, const Param in, const Param mask, bool isDilation) {
+    using cl::Buffer;
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::make_unique;
+    using std::string;
+    using std::vector;
 
-static const int THREADS_X = 16;
-static const int THREADS_Y = 16;
+    constexpr int THREADS_X = 16;
+    constexpr int THREADS_Y = 16;
 
-static const int CUBE_X    =  8;
-static const int CUBE_Y    =  8;
-static const int CUBE_Z    =  4;
+    ToNumStr<T> toNumStr;
+    const T DefaultVal = isDilation ? common::Binary<T, af_max_t>::init()
+                                    : common::Binary<T, af_min_t>::init();
+    const int windLen  = mask.info.dims[0];
+    const int SeLength = (windLen <= 10 ? windLen : 0);
 
-template<typename T, bool isDilation, int windLen>
-void morph(Param         out,
-        const Param      in,
-        const Param      mask)
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*> morProgs;
-        static std::map<int, Kernel*> morKernels;
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(isDilation),
+        TemplateArg(SeLength),
+    };
+    vector<string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(isDilation),
+        DefineValue(SeLength),
+        DefineKeyValue(init, toNumStr(DefaultVal)),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
 
-        int device = getActiveDeviceId();
+    auto morphOp = common::getKernel("morph", {{morph_cl_src}}, targs, options);
 
-        std::call_once( compileFlags[device], [device] () {
-                ToNumStr<T> toNumStr;
-                T init = isDilation ? Binary<T, af_max_t>().init() : Binary<T, af_min_t>().init();
-                std::ostringstream options;
-                options << " -D T=" << dtype_traits<T>::getName()
-                        << " -D isDilation="<< isDilation
-                        << " -D init=" << toNumStr(init)
-                        << " -D windLen=" << windLen;
-                if (std::is_same<T, double>::value ||
-                    std::is_same<T, cdouble>::value) {
-                    options << " -D USE_DOUBLE";
-                }
-                Program prog;
-                buildProgram(prog, morph_cl, morph_cl_len, options.str());
-                morProgs[device]   = new Program(prog);
-                morKernels[device] = new Kernel(*morProgs[device], "morph");
-            });
+    NDRange local(THREADS_X, THREADS_Y);
 
-        auto morphOp = KernelFunctor<Buffer, KParam,
-                                   Buffer, KParam,
-                                   Buffer, cl::LocalSpaceArg,
-                                   int, int
-                                  >(*morKernels[device]);
+    int blk_x = divup(in.info.dims[0], THREADS_X);
+    int blk_y = divup(in.info.dims[1], THREADS_Y);
 
-        NDRange local(THREADS_X, THREADS_Y);
+    NDRange global(blk_x * THREADS_X * in.info.dims[2],
+                   blk_y * THREADS_Y * in.info.dims[3]);
 
-        int blk_x = divup(in.info.dims[0], THREADS_X);
-        int blk_y = divup(in.info.dims[1], THREADS_Y);
-        // launch batch * blk_x blocks along x dimension
-        NDRange global(blk_x * THREADS_X * in.info.dims[2],
-                       blk_y * THREADS_Y * in.info.dims[3]);
+    // copy mask/filter to read-only memory
+    auto seBytes = windLen * windLen * sizeof(T);
+    auto mBuff =
+        make_unique<cl::Buffer>(getContext(), CL_MEM_READ_ONLY, seBytes);
+    morphOp.copyToReadOnly(mBuff.get(), mask.data, seBytes);
 
-        // copy mask/filter to constant memory
-        cl_int se_size   = sizeof(T)*windLen*windLen;
-        cl::Buffer *mBuff = bufferAlloc(se_size);
-        getQueue().enqueueCopyBuffer(*mask.data, *mBuff, 0, 0, se_size);
+    // calculate shared memory size
+    const int padding =
+        (windLen % 2 == 0 ? (windLen - 1) : (2 * (windLen / 2)));
+    const int locLen  = THREADS_X + padding + 1;
+    const int locSize = locLen * (THREADS_Y + padding);
 
-        // calculate shared memory size
-        const int halo    = windLen/2;
-        const int padding = 2*halo;
-        const int locLen  = THREADS_X + padding + 1;
-        const int locSize = locLen * (THREADS_Y+padding);
-
-        morphOp(EnqueueArgs(getQueue(), global, local),
-                *out.data, out.info, *in.data, in.info, *mBuff,
-                cl::Local(locSize*sizeof(T)), blk_x, blk_y);
-
-        bufferFree(mBuff);
-
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
-    }
+    morphOp(EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+            *in.data, in.info, *mBuff, cl::Local(locSize * sizeof(T)), blk_x,
+            blk_y, windLen);
+    CL_DEBUG_FINISH(getQueue());
 }
 
-template<typename T, bool isDilation, int windLen>
-void morph3d(Param       out,
-        const Param      in,
-        const Param      mask)
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*>  morProgs;
-        static std::map<int, Kernel*> morKernels;
+template<typename T>
+void morph3d(Param out, const Param in, const Param mask, bool isDilation) {
+    using cl::Buffer;
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::make_unique;
+    using std::string;
+    using std::vector;
 
-        int device = getActiveDeviceId();
+    constexpr int CUBE_X = 8;
+    constexpr int CUBE_Y = 8;
+    constexpr int CUBE_Z = 4;
 
-        std::call_once( compileFlags[device], [device] () {
-                ToNumStr<T> toNumStr;
-                T init = isDilation ? Binary<T, af_max_t>().init() : Binary<T, af_min_t>().init();
-                std::ostringstream options;
-                options << " -D T=" << dtype_traits<T>::getName()
-                        << " -D isDilation="<< isDilation
-                        << " -D init=" << toNumStr(init)
-                        << " -D windLen=" << windLen;
-                if (std::is_same<T, double>::value ||
-                    std::is_same<T, cdouble>::value) {
-                    options << " -D USE_DOUBLE";
-                }
-                Program prog;
-                buildProgram(prog, morph_cl, morph_cl_len, options.str());
-                morProgs[device]   = new Program(prog);
-                morKernels[device] = new Kernel(*morProgs[device], "morph3d");
-            });
+    ToNumStr<T> toNumStr;
+    const T DefaultVal = isDilation ? common::Binary<T, af_max_t>::init()
+                                    : common::Binary<T, af_min_t>::init();
+    const int SeLength = mask.info.dims[0];
 
-        auto morphOp = KernelFunctor<Buffer, KParam,
-                                   Buffer, KParam,
-                                   Buffer, cl::LocalSpaceArg, int
-                                  >(*morKernels[device]);
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(isDilation),
+        TemplateArg(SeLength),
+    };
+    vector<string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(isDilation),
+        DefineValue(SeLength),
+        DefineKeyValue(init, toNumStr(DefaultVal)),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
 
-        NDRange local(CUBE_X, CUBE_Y, CUBE_Z);
+    auto morphOp =
+        common::getKernel("morph3d", {{morph_cl_src}}, targs, options);
 
-        int blk_x = divup(in.info.dims[0], CUBE_X);
-        int blk_y = divup(in.info.dims[1], CUBE_Y);
-        int blk_z = divup(in.info.dims[2], CUBE_Z);
-        // launch batch * blk_x blocks along x dimension
-        NDRange global(blk_x * CUBE_X * in.info.dims[3],
-                       blk_y * CUBE_Y,
-                       blk_z * CUBE_Z);
+    NDRange local(CUBE_X, CUBE_Y, CUBE_Z);
 
-        // copy mask/filter to constant memory
-        cl_int se_size   = sizeof(T)*windLen*windLen*windLen;
-        cl::Buffer *mBuff = bufferAlloc(se_size);
-        getQueue().enqueueCopyBuffer(*mask.data, *mBuff, 0, 0, se_size);
+    int blk_x = divup(in.info.dims[0], CUBE_X);
+    int blk_y = divup(in.info.dims[1], CUBE_Y);
+    int blk_z = divup(in.info.dims[2], CUBE_Z);
 
-        // calculate shared memory size
-        const int halo    = windLen/2;
-        const int padding = 2*halo;
-        const int locLen  = CUBE_X+padding+1;
-        const int locArea = locLen *(CUBE_Y+padding);
-        const int locSize = locArea*(CUBE_Z+padding);
+    NDRange global(blk_x * CUBE_X * in.info.dims[3], blk_y * CUBE_Y,
+                   blk_z * CUBE_Z);
 
-        morphOp(EnqueueArgs(getQueue(), global, local),
-                *out.data, out.info, *in.data, in.info,
-                *mBuff, cl::Local(locSize*sizeof(T)), blk_x);
+    cl_int seBytes = sizeof(T) * SeLength * SeLength * SeLength;
+    auto mBuff =
+        make_unique<cl::Buffer>(getContext(), CL_MEM_READ_ONLY, seBytes);
+    morphOp.copyToReadOnly(mBuff.get(), mask.data, seBytes);
 
-        bufferFree(mBuff);
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
-    }
+    // calculate shared memory size
+    const int padding =
+        (SeLength % 2 == 0 ? (SeLength - 1) : (2 * (SeLength / 2)));
+    const int locLen  = CUBE_X + padding + 1;
+    const int locArea = locLen * (CUBE_Y + padding);
+    const int locSize = locArea * (CUBE_Z + padding);
+
+    morphOp(EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+            *in.data, in.info, *mBuff, cl::Local(locSize * sizeof(T)), blk_x);
+    CL_DEBUG_FINISH(getQueue());
 }
-
-}
-
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

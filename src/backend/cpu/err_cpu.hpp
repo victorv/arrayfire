@@ -7,9 +7,10 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <err_common.hpp>
+#include <common/err_common.hpp>
 
-#define CPU_NOT_SUPPORTED() do {                        \
-        throw SupportError(__PRETTY_FUNCTION__,         \
-                __AF_FILENAME__, __LINE__, "CPU");      \
-    } while(0)
+#define CPU_NOT_SUPPORTED(message)                                          \
+    do {                                                                    \
+        throw SupportError(__AF_FUNC__, __AF_FILENAME__, __LINE__, message, \
+                           boost::stacktrace::stacktrace());                \
+    } while (0)

@@ -1,23 +1,85 @@
-FILE(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/kernel/sort_by_key/sort_by_key_impl.cpp" FILESTRINGS)
+# Copyright (c) 2017, ArrayFire
+# All rights reserved.
+#
+# This file is distributed under 3-clause BSD license.
+# The complete license agreement can be obtained at:
+# http://arrayfire.com/licenses/BSD-3-Clause
 
-FOREACH(STR ${FILESTRINGS})
-    IF(${STR} MATCHES "// SBK_TYPES")
-        STRING(REPLACE "// SBK_TYPES:" "" TEMP ${STR})
-        STRING(REPLACE " " ";" SBK_TYPES ${TEMP})
-    ENDIF()
-ENDFOREACH()
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/kernel/sort_by_key/sort_by_key_impl.cpp" FILESTRINGS)
 
-FOREACH(SBK_TYPE ${SBK_TYPES})
-    ADD_LIBRARY(opencl_sort_by_key_${SBK_TYPE} OBJECT
+foreach(STR ${FILESTRINGS})
+    if(${STR} MATCHES "// SBK_TYPES")
+        string(REPLACE "// SBK_TYPES:" "" TEMP ${STR})
+        string(REPLACE " " ";" SBK_TYPES ${TEMP})
+    endif()
+endforeach()
+
+add_library(opencl_sort_by_key INTERFACE)
+foreach(SBK_TYPE ${SBK_TYPES})
+    add_library(opencl_sort_by_key_${SBK_TYPE} OBJECT
         "${CMAKE_CURRENT_SOURCE_DIR}/kernel/sort_by_key/sort_by_key_impl.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/kernel/sort_by_key_impl.hpp")
-    ADD_DEPENDENCIES(opencl_sort_by_key_${SBK_TYPE} ${cl_kernel_targets})
-    IF(NOT USE_SYSTEM_CL2HPP)
-        ADD_DEPENDENCIES(opencl_sort_by_key_${SBK_TYPE} cl2hpp)
-    ENDIF(NOT USE_SYSTEM_CL2HPP)
-    IF(FORGE_FOUND AND NOT USE_SYSTEM_FORGE)
-        ADD_DEPENDENCIES(opencl_sort_by_key_${SBK_TYPE} forge)
-    ENDIF()
-    SET_TARGET_PROPERTIES(opencl_sort_by_key_${SBK_TYPE} PROPERTIES COMPILE_FLAGS "-DTYPE=${SBK_TYPE}")
-    LIST(APPEND SORT_BY_KEY_OBJECTS $<TARGET_OBJECTS:opencl_sort_by_key_${SBK_TYPE}>)
-ENDFOREACH(SBK_TYPE ${SBK_TYPES})
+    add_dependencies(opencl_sort_by_key_${SBK_TYPE}
+                        ${cl_kernel_targets} OpenCL::cl2hpp Boost::boost)
+
+    target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+      SYSTEM PRIVATE
+        ${span-lite_SOURCE_DIR}/include
+        $<TARGET_PROPERTY:OpenCL::OpenCL,INTERFACE_INCLUDE_DIRECTORIES>
+        $<TARGET_PROPERTY:OpenCL::cl2hpp,INTERFACE_INCLUDE_DIRECTORIES>
+        $<TARGET_PROPERTY:Boost::boost,INTERFACE_INCLUDE_DIRECTORIES>
+        $<TARGET_PROPERTY:af_spdlog,INTERFACE_INCLUDE_DIRECTORIES>)
+
+    target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+      PRIVATE
+        .
+        ..
+        ../../api/c
+        ../common
+        ../../../include
+        magma
+        ${ArrayFire_BINARY_DIR}/include
+        ${CMAKE_CURRENT_BINARY_DIR})
+
+    if(TARGET Forge::forge)
+      target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+        SYSTEM INTERFACE
+          $<TARGET_PROPERTY:Forge::forge,INCLUDE_DIRECTORIES>
+      )
+    else()
+      target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+        SYSTEM INTERFACE
+          ${${forge_prefix}_SOURCE_DIR}/include
+          ${${forge_prefix}_BINARY_DIR}/include
+      )
+    endif()
+    if(TARGET glad::glad)
+      target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+        SYSTEM INTERFACE
+          $<TARGET_PROPERTY:glad::glad,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    else()
+      target_include_directories(opencl_sort_by_key_${SBK_TYPE}
+        SYSTEM INTERFACE
+          $<TARGET_PROPERTY:af_glad,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    endif()
+
+    set_target_properties(opencl_sort_by_key_${SBK_TYPE}
+      PROPERTIES
+        CXX_STANDARD 17
+        CXX_EXTENSIONS False
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        FOLDER "Generated Targets")
+
+    arrayfire_set_default_cxx_flags(opencl_sort_by_key_${SBK_TYPE})
+
+    target_compile_definitions(opencl_sort_by_key_${SBK_TYPE}
+      PRIVATE
+        ${opencl_compile_definitions}
+        $<TARGET_PROPERTY:Boost::boost,INTERFACE_COMPILE_DEFINITIONS>
+        TYPE=${SBK_TYPE} AFDLL)
+    target_sources(opencl_sort_by_key
+      INTERFACE $<TARGET_OBJECTS:opencl_sort_by_key_${SBK_TYPE}>)
+endforeach(SBK_TYPE ${SBK_TYPES})

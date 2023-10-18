@@ -7,54 +7,55 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <complex>
-#include <af/dim4.hpp>
-#include <af/algorithm.h>
-#include <err_common.hpp>
-#include <handle.hpp>
-#include <ops.hpp>
-#include <where.hpp>
 #include <backend.hpp>
+#include <common/err_common.hpp>
+#include <handle.hpp>
+#include <where.hpp>
+#include <af/algorithm.h>
+#include <af/dim4.hpp>
+#include <complex>
 
-using af::dim4;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
+using std::swap;
 
 template<typename T>
-static inline af_array where(const af_array in)
-{
+static inline af_array where(const af_array in) {
     // Making it more explicit that the output is uint
     return getHandle<uint>(where<T>(getArray<T>(in)));
 }
 
-af_err af_where(af_array *idx, const af_array in)
-{
+af_err af_where(af_array* idx, const af_array in) {
     try {
-        ArrayInfo i_info = getInfo(in);
-        af_dtype type = i_info.getType();
+        const ArrayInfo& i_info = getInfo(in);
+        af_dtype type           = i_info.getType();
 
-        if(i_info.ndims() == 0) {
-            dim_t my_dims[] = {0, 0, 0, 0};
-            return af_create_handle(idx, AF_MAX_DIMS, my_dims, u32);
+        if (i_info.ndims() == 0) {
+            return af_create_handle(idx, 0, nullptr, u32);
         }
 
         af_array res;
-        switch(type) {
-        case f32: res = where<float  >(in); break;
-        case f64: res = where<double >(in); break;
-        case c32: res = where<cfloat >(in); break;
-        case c64: res = where<cdouble>(in); break;
-        case s32: res = where<int    >(in); break;
-        case u32: res = where<uint   >(in); break;
-        case s64: res = where<intl   >(in); break;
-        case u64: res = where<uintl  >(in); break;
-        case s16: res = where<short  >(in); break;
-        case u16: res = where<ushort >(in); break;
-        case u8 : res = where<uchar  >(in); break;
-        case b8 : res = where<char   >(in); break;
-        default:
-            TYPE_ERROR(1, type);
+        switch (type) {
+            case f32: res = where<float>(in); break;
+            case f64: res = where<double>(in); break;
+            case c32: res = where<cfloat>(in); break;
+            case c64: res = where<cdouble>(in); break;
+            case s32: res = where<int>(in); break;
+            case u32: res = where<uint>(in); break;
+            case s64: res = where<intl>(in); break;
+            case u64: res = where<uintl>(in); break;
+            case s16: res = where<short>(in); break;
+            case u16: res = where<ushort>(in); break;
+            case u8: res = where<uchar>(in); break;
+            case b8: res = where<char>(in); break;
+            default: TYPE_ERROR(1, type);
         }
-        std::swap(*idx, res);
+        swap(*idx, res);
     }
     CATCHALL
 

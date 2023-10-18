@@ -9,10 +9,11 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-
-template<typename inType, typename outType, bool isLinear>
-Array<outType> histogram(const Array<inType> &in, const unsigned &nbins, const double &minval, const double &maxval);
-
-}
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+Array<uint> histogram(const Array<T> &in, const unsigned &nbins,
+                      const double &minval, const double &maxval,
+                      const bool isLinear);
+}  // namespace cuda
+}  // namespace arrayfire

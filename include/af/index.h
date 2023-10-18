@@ -12,15 +12,14 @@
 #include <af/seq.h>
 
 ///
-/// \brief Struct used while indexing af_array
+/// \brief Struct used to index an af_array
 ///
 /// This struct represents objects which can be used to index into an af_array
 /// Object. It contains a union object which can be an \ref af_seq or an
 /// \ref af_array. Indexing with an int can be represented using a \ref af_seq
 /// object with the same \ref af_seq::begin and \ref af_seq::end with an
 /// af_seq::step of 1
-///
-typedef struct af_index_t{
+typedef struct af_index_t {
     union {
         af_array arr;   ///< The af_array used for indexing
         af_seq   seq;   ///< The af_seq used for indexing
@@ -49,6 +48,7 @@ class seq;
 /// \note This is a helper class and does not necessarily need to be created
 /// explicitly. It is used in the operator() overloads to simplify the API.
 ///
+/// \ingroup arrayfire_class
 class AFAPI index {
 
     af_index_t impl;
@@ -138,7 +138,7 @@ class AFAPI index {
     ///
     index & operator=(const index& idx0);
 
-#if __cplusplus > 199711L
+#if AF_COMPILER_CXX_RVALUE_REFERENCES
     ///
     /// \brief Move constructor
     ///
@@ -157,16 +157,15 @@ class AFAPI index {
 };
 
 ///
-/// Lookup the values of input array based on index
+/// Lookup the values of an input array by indexing with another array
 ///
-/// \param[in] in is input lookup array
-/// \param[in] idx is lookup indices
+/// \param[in] in is the input array that will be queried
+/// \param[in] idx are the lookup indices
 /// \param[in] dim specifies the dimension for indexing
-/// \returns an array containing values at locations specified by \p index
+/// \returns an array containing values of \p in at locations specified by \p index
 ///
-/// \ingroup index_func_index
+/// \ingroup index_func_lookup
 ///
-
 AFAPI array lookup(const array &in, const array &idx, const int dim = -1);
 
 #if AF_API_VERSION >= 31
@@ -181,7 +180,6 @@ AFAPI array lookup(const array &in, const array &idx, const int dim = -1);
 /// \param[in] idx3 The fourth index (defaults to \ref af::span)
 /// \ingroup index_func_index
 ///
-
 AFAPI void copy(array &dst, const array &src,
                 const index &idx0,
                 const index &idx1 = span,
@@ -206,24 +204,22 @@ extern "C" {
     /// \param[in] index is an array of sequences
     ///
     /// \ingroup index_func_index
-
     AFAPI af_err af_index(  af_array *out,
                             const af_array in,
                             const unsigned ndims, const af_seq* const index);
 
 
     ///
-    /// Lookup the values of input array based on index
+    /// Lookup the values of an input array by indexing with another array
     ///
-    /// \param[out] out      output array containing values at locations
-    ///                      specified by \p index
-    /// \param[in] in        is input lookup array
-    /// \param[in] indices   is lookup indices
+    /// \param[out] out      output array containing values of \p in at locations
+    ///                      specified by \p indices
+    /// \param[in] in        is the input array that will be queried
+    /// \param[in] indices   are the lookup indices
     /// \param[in] dim       specifies the dimension for indexing
     ///
-    /// \ingroup index_func_index
+    /// \ingroup index_func_lookup
     ///
-
     AFAPI af_err af_lookup( af_array *out,
                             const af_array in, const af_array indices,
                             const unsigned dim);
@@ -243,7 +239,6 @@ extern "C" {
     ///
     /// \ingroup index_func_assign
     ///
-
     AFAPI af_err af_assign_seq( af_array *out,
                                 const af_array lhs,
                                 const unsigned ndims, const af_seq* const indices,

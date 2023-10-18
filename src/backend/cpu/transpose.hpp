@@ -9,13 +9,14 @@
 
 #include <Array.hpp>
 
-namespace cpu
-{
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-Array<T>  transpose(const Array<T> &in, const bool conjugate);
+Array<T> transpose(const Array<T> &in, const bool conjugate);
 
 template<typename T>
 void transpose_inplace(Array<T> &in, const bool conjugate);
 
-}
+}  // namespace cpu
+}  // namespace arrayfire

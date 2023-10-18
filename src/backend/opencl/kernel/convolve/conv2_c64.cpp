@@ -9,14 +9,12 @@
 
 #include <kernel/convolve/conv2_impl.hpp>
 
-namespace opencl
-{
-
-namespace kernel
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
 INSTANTIATE(cdouble, cdouble)
 
-}
-
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

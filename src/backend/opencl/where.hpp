@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace opencl
-{
-    template<typename T>
-    Array<uint> where(const Array<T>& in);
-}
+namespace arrayfire {
+namespace opencl {
+template<typename T>
+Array<uint> where(const Array<T>& in);
+}  // namespace opencl
+}  // namespace arrayfire

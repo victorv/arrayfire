@@ -12,7 +12,7 @@
 #include <af/defines.h>
 #include <af/array.h>
 
-typedef unsigned long long af_window;
+typedef void* af_window;
 
 typedef struct {
     int row;
@@ -83,12 +83,13 @@ class AFAPI Window {
            Creates a window object with default width
            and height with title set to "ArrayFire"
 
-           \param[in] wnd is an \ref af_window handle which can be retrieved by
+           \param[in] window is an \ref af_window handle which can be retrieved
+                             by
            doing a get call on any \ref Window object
 
            \ingroup gfx_func_window
          */
-        Window(const af_window wnd);
+        Window(const af_window window);
 
         /**
            Destroys the window handle
@@ -169,7 +170,7 @@ class AFAPI Window {
 
            \ingroup gfx_func_draw
          */
-        DEPRECATED("Use plot instead")
+        AF_DEPRECATED("Use plot instead")
         void plot3(const array& in, const char* title=NULL);
 #endif
 
@@ -279,7 +280,7 @@ class AFAPI Window {
 
            \ingroup gfx_func_draw
          */
-        DEPRECATED("Use scatter instead")
+        AF_DEPRECATED("Use scatter instead")
         void scatter3(const array& P, const af::markerType marker = AF_MARKER_POINT,
                       const char* const title = NULL);
 #endif
@@ -483,13 +484,29 @@ class AFAPI Window {
         */
         void setAxesTitles(const char * const xtitle = "X-Axis",
                            const char * const ytitle = "Y-Axis",
-                           const char * const ztitle = "Z-Axis");
+                           const char * const ztitle = NULL);
 #endif
+
+#if AF_API_VERSION >= 37
+        /**
+           Setup the axes label formats for charts
+
+           \param[in] xformat is a printf-style format specifier for x-axis
+           \param[in] yformat is a printf-style format specifier for y-axis
+           \param[in] zformat is a printf-style format specifier for z-axis
+
+           \ingroup gfx_func_window
+        */
+        void setAxesLabelFormat(const char *const xformat = "4.1%f",
+                                const char *const yformat = "4.1%f",
+                                const char *const zformat = NULL);
+#endif
+
         /**
            Setup grid layout for multiview mode in a window
 
-           \param[in]   rows is number of rows you want to show in a window
-           \param[in]   cols is number of coloumns you want to show in a window
+           \param[in]   rows is number of rows you want to divide the display area
+           \param[in]   cols is number of coloumns you want to divide the display area
 
            \ingroup gfx_func_window
         */
@@ -531,6 +548,9 @@ class AFAPI Window {
            store the cell coordinates and return a reference to the very object that
            called upon this function. This reference can be used later to issue
            draw calls using rendering functions.
+
+           \param[in] r is row identifier where current object has to be rendered
+           \param[in] c is column identifier where current object has to be rendered
 
            \return a reference to the object pointed by this
            to enable cascading this call with rendering functions.
@@ -641,7 +661,7 @@ AFAPI af_err af_draw_image(const af_window wind, const af_array in, const af_cel
 
    \ingroup gfx_func_draw
 */
-DEPRECATED("Use af_draw_plot_nd or af_draw_plot_2d instead")
+AF_DEPRECATED("Use af_draw_plot_nd or af_draw_plot_2d instead")
 AFAPI af_err af_draw_plot(const af_window wind, const af_array X, const af_array Y, const af_cell* const props);
 
 #if AF_API_VERSION >= 32
@@ -660,7 +680,7 @@ AFAPI af_err af_draw_plot(const af_window wind, const af_array X, const af_array
 
    \ingroup gfx_func_draw
 */
-DEPRECATED("Use af_draw_plot_nd or af_draw_plot_3d instead")
+AF_DEPRECATED("Use af_draw_plot_nd or af_draw_plot_3d instead")
 AFAPI af_err af_draw_plot3(const af_window wind, const af_array P, const af_cell* const props);
 #endif
 
@@ -746,7 +766,7 @@ AFAPI af_err af_draw_plot_3d(const af_window wind,
 
    \ingroup gfx_func_draw
 */
-DEPRECATED("Use af_draw_scatter_nd or af_draw_scatter_2d instead")
+AF_DEPRECATED("Use af_draw_scatter_nd or af_draw_scatter_2d instead")
 AFAPI af_err af_draw_scatter(const af_window wind, const af_array X, const af_array Y,
                              const af_marker_type marker, const af_cell* const props);
 #endif
@@ -766,7 +786,7 @@ AFAPI af_err af_draw_scatter(const af_window wind, const af_array X, const af_ar
 
    \ingroup gfx_func_draw
 */
-DEPRECATED("Use af_draw_scatter_nd or af_draw_scatter_3d instead")
+AF_DEPRECATED("Use af_draw_scatter_nd or af_draw_scatter_3d instead")
 AFAPI af_err af_draw_scatter3(const af_window wind, const af_array P,
                               const af_marker_type marker, const af_cell* const props);
 #endif
@@ -1059,7 +1079,15 @@ AFAPI af_err af_set_axes_limits_3d(const af_window wind,
 
 #if AF_API_VERSION >= 34
 /**
-   C Interface wrapper for setting axes titles for histogram/plot/surface/vector field
+   C Interface wrapper for setting axes titles for histogram/plot/surface/vector
+   field
+
+   Passing correct value to \p ztitle dictates the right behavior when it comes
+   to setting the axes titles appropriately.  If the user is targeting a two
+   dimensional chart on the window \p wind, then the user needs to pass NULL to
+   \p ztitle so that internal caching mechanism understands this window requires
+   a 2D chart. Any non NULL value passed to \p ztitle will result in ArrayFire
+   thinking the \p wind intends to use a 3D chart.
 
    \param[in] wind is the window handle
    \param[in] xtitle is the name of the x-axis
@@ -1075,6 +1103,35 @@ AFAPI af_err af_set_axes_titles(const af_window wind,
                                 const char * const ytitle,
                                 const char * const ztitle,
                                 const af_cell* const props);
+#endif
+
+#if AF_API_VERSION >= 37
+/**
+   C Interface wrapper for setting axes labels formats for charts
+
+   Axes labels use printf style format specifiers. Default specifier for the
+   data displayed as labels is `%4.1f`. This function lets the user change this
+   label formatting to whichever format that fits their data range and precision.
+
+   \param[in] wind is the window handle
+   \param[in] xformat is a printf-style format specifier for x-axis
+   \param[in] yformat is a printf-style format specifier for y-axis
+   \param[in] zformat is a printf-style format specifier for z-axis
+   \param[in] props is structure \ref af_cell that has the properties that
+              are used for the current rendering.
+
+   \note \p zformat can be NULL in which case ArrayFire understands that the
+   label formats are meant for a 2D chart corresponding to this \p wind
+   or a specific cell in multi-viewport mode (provided via \p props argument).
+   A non NULL value to \p zformat means the label formats belong to a 3D chart.
+
+   \ingroup gfx_func_window
+*/
+AFAPI af_err af_set_axes_label_format(const af_window wind,
+                                      const char *const xformat,
+                                      const char *const yformat,
+                                      const char *const zformat,
+                                      const af_cell *const props);
 #endif
 
 /**

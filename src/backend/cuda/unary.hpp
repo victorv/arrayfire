@@ -7,179 +7,107 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
 #include <Array.hpp>
-#include <optypes.hpp>
+#include <common/jit/NaryNode.hpp>
+#include <common/jit/UnaryNode.hpp>
 #include <math.hpp>
-#include <err_cuda.hpp>
-#include <JIT/UnaryNode.hpp>
+#include <optypes.hpp>
 
-namespace cuda
-{
+namespace arrayfire {
+namespace cuda {
 
-template<typename T, af_op_t op>
-struct UnOp
-{
-    const char *name()
-    {
-        return "noop";
+template<af_op_t op>
+static const char *unaryName();
+
+#define UNARY_DECL(OP, FNAME)                     \
+    template<>                                    \
+    inline const char *unaryName<af_##OP##_t>() { \
+        return FNAME;                             \
     }
-};
 
-#define UNARY_FN(fn)                                \
-    template<typename T>                            \
-    struct UnOp<T, af_##fn##_t>                     \
-    {                                               \
-        std::string res;                            \
-        bool is_check;                              \
-        UnOp() :                                    \
-            res(cuMangledName<T, false>("___"#fn)), \
-            is_check(false)                         \
-        {                                           \
-        }                                           \
-        const std::string name()                    \
-        {                                           \
-            return res;                             \
-        }                                           \
-    };                                              \
+#define UNARY_FN(OP) UNARY_DECL(OP, #OP)
 
-#define UNARY_FN_NAME(op, fn)                       \
-    template<typename T>                            \
-    struct UnOp<T, af_##op##_t>                     \
-    {                                               \
-        std::string res;                            \
-        bool is_check;                              \
-        UnOp() :                                    \
-            res(cuMangledName<T, false>("___"#fn)), \
-            is_check(false)                         \
-        {                                           \
-        }                                           \
-        const std::string name()                    \
-        {                                           \
-            return res;                             \
-        }                                           \
-    };                                              \
+UNARY_FN(sin)
+UNARY_FN(cos)
+UNARY_FN(tan)
 
-#if defined(USE_LIBDEVICE)
-#define NVVM_SPECIALIZE_TYPE(T, fn, fname)      \
-    template<>                                  \
-    struct UnOp<T, af_##fn##_t>                 \
-    {                                           \
-        std::string res;                        \
-        bool is_check;                          \
-        UnOp() :                                \
-            res("@__nv_"#fname),                \
-            is_check(false)                     \
-        {                                       \
-        }                                       \
-        const std::string name()                \
-        {                                       \
-            return res;                         \
-        }                                       \
-    };                                          \
+UNARY_FN(asin)
+UNARY_FN(acos)
+UNARY_FN(atan)
 
-#define NVVM_SPECIALIZE_CHECK(T, fn, fname)     \
-    template<>                                  \
-    struct UnOp<T, af_##fn##_t>                 \
-    {                                           \
-        std::string res;                        \
-        bool is_check;                          \
-        UnOp() :                                \
-            res("@__nv_"#fname),                \
-            is_check(true)                      \
-        {                                       \
-        }                                       \
-        const std::string name()                \
-        {                                       \
-            return res;                         \
-        }                                       \
-    };                                          \
+UNARY_FN(sinh)
+UNARY_FN(cosh)
+UNARY_FN(tanh)
 
-#else
-#define NVVM_SPECIALIZE_TYPE(T, fn, fname)  // no specialization
-#define NVVM_SPECIALIZE_CHECK(T, fn, fname)  // no specialization
-#endif
+UNARY_FN(asinh)
+UNARY_FN(acosh)
+UNARY_FN(atanh)
 
-#define NVVM_SPECIALIZE_FLOATING_NAME(fn, fname)    \
-    UNARY_FN(fn)                                    \
-    NVVM_SPECIALIZE_TYPE(float, fn, fname##f)       \
-    NVVM_SPECIALIZE_TYPE(double, fn, fname)         \
+UNARY_FN(exp)
+UNARY_DECL(sigmoid, "__sigmoid")
+UNARY_FN(expm1)
+UNARY_FN(erf)
+UNARY_FN(erfc)
 
+UNARY_FN(tgamma)
+UNARY_FN(lgamma)
 
-#define NVVM_SPECIALIZE_FLOATING(fn)            \
-    NVVM_SPECIALIZE_FLOATING_NAME(fn, fn)
+UNARY_FN(log)
+UNARY_FN(log1p)
+UNARY_FN(log10)
+UNARY_FN(log2)
 
-NVVM_SPECIALIZE_FLOATING(sin)
-NVVM_SPECIALIZE_FLOATING(cos)
-NVVM_SPECIALIZE_FLOATING(tan)
-NVVM_SPECIALIZE_FLOATING(asin)
-NVVM_SPECIALIZE_FLOATING(acos)
-NVVM_SPECIALIZE_FLOATING(atan)
-NVVM_SPECIALIZE_FLOATING(sinh)
-NVVM_SPECIALIZE_FLOATING(cosh)
-NVVM_SPECIALIZE_FLOATING(tanh)
-NVVM_SPECIALIZE_FLOATING(asinh)
-NVVM_SPECIALIZE_FLOATING(acosh)
-NVVM_SPECIALIZE_FLOATING(atanh)
-NVVM_SPECIALIZE_FLOATING(exp)
-NVVM_SPECIALIZE_FLOATING(expm1)
-NVVM_SPECIALIZE_FLOATING(erf)
-NVVM_SPECIALIZE_FLOATING(erfc)
-NVVM_SPECIALIZE_FLOATING(tgamma)
-NVVM_SPECIALIZE_FLOATING(lgamma)
-NVVM_SPECIALIZE_FLOATING(log)
-NVVM_SPECIALIZE_FLOATING(log1p)
-NVVM_SPECIALIZE_FLOATING(log10)
-NVVM_SPECIALIZE_FLOATING(log2)
-NVVM_SPECIALIZE_FLOATING(sqrt)
-NVVM_SPECIALIZE_FLOATING(cbrt)
-NVVM_SPECIALIZE_FLOATING(round)
-NVVM_SPECIALIZE_FLOATING(trunc)
-NVVM_SPECIALIZE_FLOATING(ceil)
-NVVM_SPECIALIZE_FLOATING(floor)
+UNARY_FN(sqrt)
+UNARY_FN(rsqrt)
+UNARY_FN(cbrt)
 
-UNARY_FN(sign )
-NVVM_SPECIALIZE_CHECK(float , sign, signbitf)
-NVVM_SPECIALIZE_CHECK(double, sign, signbitd)
+UNARY_FN(trunc)
+UNARY_FN(round)
+UNARY_FN(signbit)
+UNARY_FN(ceil)
+UNARY_FN(floor)
 
-UNARY_FN_NAME(isnan, isNaN)
-NVVM_SPECIALIZE_CHECK(float , isnan, isnanf)
-NVVM_SPECIALIZE_CHECK(double, isnan, isnand)
+UNARY_DECL(bitnot, "__bitnot")
+UNARY_DECL(isinf, "__isinf")
+UNARY_DECL(isnan, "__isnan")
+UNARY_FN(iszero)
+UNARY_DECL(noop, "__noop")
 
-UNARY_FN_NAME(isinf, isINF)
-NVVM_SPECIALIZE_CHECK(float , isinf, isinff)
-NVVM_SPECIALIZE_CHECK(double, isinf, isinfd)
-
-UNARY_FN_NAME(iszero, iszero)
-UNARY_FN(sigmoid)
-
+#undef UNARY_DECL
 #undef UNARY_FN
 
-    template<typename T, af_op_t op>
-    Array<T> unaryOp(const Array<T> &in)
-    {
+template<typename T, af_op_t op>
+Array<T> unaryOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
+    using arrayfire::common::Node;
+    using arrayfire::common::Node_ptr;
+    using std::array;
 
-        UnOp<T, op> uop;
+    auto createUnary = [](array<Node_ptr, 1> &operands) {
+        return common::Node_ptr(new common::UnaryNode(
+            static_cast<af::dtype>(af::dtype_traits<T>::af_type),
+            unaryName<op>(), operands[0], op));
+    };
 
-        JIT::Node_ptr in_node = in.getNode();
-
-        JIT::UnaryNode *node = new JIT::UnaryNode(irname<T>(),
-                                                  afShortName<T>(),
-                                                  uop.name(),
-                                                  in_node, op, uop.is_check);
-
-        return createNodeArray<T>(in.dims(), JIT::Node_ptr(reinterpret_cast<JIT::Node *>(node)));
-    }
-
-    template<typename T, af_op_t op>
-    Array<char> checkOp(const Array<T> &in)
-    {
-        UnOp<T, op> uop;
-
-        JIT::Node_ptr in_node = in.getNode();
-        JIT::UnaryNode *node = new JIT::UnaryNode(irname<char>(),
-                                                  afShortName<char>(),
-                                                  uop.name(),
-                                                  in_node, op, uop.is_check);
-        return createNodeArray<char>(in.dims(), JIT::Node_ptr(reinterpret_cast<JIT::Node *>(node)));
-    }
+    if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
+    Node_ptr out = common::createNaryNode<T, 1>(outDim, createUnary, {&in});
+    return createNodeArray<T>(outDim, out);
 }
+
+template<typename T, af_op_t op>
+Array<char> checkOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
+    using arrayfire::common::Node_ptr;
+
+    auto createUnary = [](std::array<Node_ptr, 1> &operands) {
+        return Node_ptr(new common::UnaryNode(
+            static_cast<af::dtype>(dtype_traits<char>::af_type),
+            unaryName<op>(), operands[0], op));
+    };
+
+    if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
+    Node_ptr out = common::createNaryNode<T, 1>(outDim, createUnary, {&in});
+    return createNodeArray<char>(outDim, out);
+}
+
+}  // namespace cuda
+}  // namespace arrayfire

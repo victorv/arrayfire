@@ -8,87 +8,71 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/laset.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <types.hpp>
+#include <kernel_headers/laset.hpp>
+#include <magma_types.h>
 #include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-
-namespace opencl
-{
-
-namespace kernel
-{
-
-static const int BLK_X = 64;
-static const int BLK_Y = 32;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
 template<int num>
-const char *laset_name() { return "laset_none"; }
-template<> const char *laset_name<0>() { return "laset_full"; }
-template<> const char *laset_name<1>() { return "laset_lower"; }
-template<> const char *laset_name<2>() { return "laset_upper"; }
+const char *laset_name() {
+    return "laset_none";
+}
+template<>
+const char *laset_name<0>() {
+    return "laset_full";
+}
+template<>
+const char *laset_name<1>() {
+    return "laset_lower";
+}
+template<>
+const char *laset_name<2>() {
+    return "laset_upper";
+}
 
 template<typename T, int uplo>
-void laset(int m, int  n,
-           T offdiag, T diag,
-           cl_mem dA, size_t dA_offset, magma_int_t ldda)
-{
+void laset(int m, int n, T offdiag, T diag, cl_mem dA, size_t dA_offset,
+           magma_int_t ldda, cl_command_queue queue) {
+    constexpr int BLK_X = 64;
+    constexpr int BLK_Y = 32;
 
-    static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-    static std::map<int, Program*>  setProgs;
-    static std::map<int, Kernel*> setKernels;
+    std::array<TemplateArg, 2> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(uplo),
+    };
+    std::array<std::string, 5> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()), DefineValue(BLK_X),
+        DefineValue(BLK_Y),
+        DefineKeyValue(IS_CPLX, static_cast<int>(iscplx<T>())),
+        getTypeBuildDefinition<T>()};
 
-    int device = getActiveDeviceId();
-
-    std::call_once(compileFlags[device], [device] () {
-
-            std::ostringstream options;
-            options << " -D T=" << dtype_traits<T>::getName()
-                    << " -D BLK_X=" << BLK_X
-                    << " -D BLK_Y=" << BLK_Y
-                    << " -D IS_CPLX=" << af::iscplx<T>();
-
-            if (std::is_same<T, double>::value ||
-                std::is_same<T, cdouble>::value) {
-                options << " -D USE_DOUBLE";
-            }
-
-            cl::Program prog;
-            buildProgram(prog, laset_cl, laset_cl_len, options.str());
-            setProgs[device] = new Program(prog);
-            setKernels[device] = new Kernel(*setProgs[device], laset_name<uplo>());
-        });
+    auto lasetOp =
+        common::getKernel(laset_name<uplo>(), {{laset_cl_src}}, targs, options);
 
     int groups_x = (m - 1) / BLK_X + 1;
     int groups_y = (n - 1) / BLK_Y + 1;
 
-    NDRange local(BLK_X, 1);
-    NDRange global(groups_x * local[0],
-                   groups_y * local[1]);
+    cl::NDRange local(BLK_X, 1);
+    cl::NDRange global(groups_x * local[0], groups_y * local[1]);
 
     // retain the cl_mem object during cl::Buffer creation
     cl::Buffer dAObj(dA, true);
 
-    auto lasetOp = KernelFunctor<int, int, T, T, Buffer, unsigned long long, int>(*setKernels[device]);
-    lasetOp(EnqueueArgs(getQueue(), global, local),
-            m, n, offdiag, diag, dAObj, dA_offset, ldda);
+    cl::CommandQueue q(queue, true);
+    lasetOp(cl::EnqueueArgs(q, global, local), m, n, offdiag, diag, dAObj,
+            dA_offset, ldda);
 }
-
-}
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

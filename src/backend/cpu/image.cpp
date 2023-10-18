@@ -10,40 +10,40 @@
 // Parts of this code sourced from SnopyDogy
 // https://gist.github.com/SnopyDogy/a9a22497a893ec86aa3e
 
-#if defined (WITH_GRAPHICS)
-
 #include <Array.hpp>
-#include <image.hpp>
+#include <common/graphics_common.hpp>
 #include <err_cpu.hpp>
-#include <graphics_common.hpp>
+#include <image.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
 
-using af::dim4;
+using arrayfire::common::ForgeManager;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
 
-namespace cpu
-{
-using namespace gl;
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-void copy_image(const Array<T> &in, const forge::Image* image)
-{
-    in.eval();
-    getQueue().sync();
+void copy_image(const Array<T> &in, fg_image image) {
+    ForgeModule &_ = forgePlugin();
 
     CheckGL("Before CopyArrayToImage");
     const T *d_X = in.get();
-    size_t data_size = image->size();
+    getQueue().sync();
 
-    glBindBuffer(gl::GL_PIXEL_UNPACK_BUFFER, image->pixels());
+    unsigned data_size = 0, buffer = 0;
+    FG_CHECK(_.fg_get_pixel_buffer(&buffer, image));
+    FG_CHECK(_.fg_get_image_size(&data_size, image));
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
     glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, data_size, d_X);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     CheckGL("In CopyArrayToImage");
 }
 
-#define INSTANTIATE(T)  \
-    template void copy_image<T>(const Array<T> &in, const forge::Image* image);
+#define INSTANTIATE(T) template void copy_image<T>(const Array<T> &, fg_image);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -54,6 +54,5 @@ INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
 
-}
-
-#endif  // WITH_GRAPHICS
+}  // namespace cpu
+}  // namespace arrayfire

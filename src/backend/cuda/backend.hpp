@@ -8,17 +8,24 @@
  ********************************************************/
 
 #pragma once
+
 #ifdef __DH__
 #undef __DH__
 #endif
 
+#ifdef __CUDACC_RTC__
+#define __DH__ __device__
+#else
 #ifdef __CUDACC__
 #include <cuda_runtime.h>
 #define __DH__ __device__ __host__
 #else
 #define __DH__
 #endif
+#endif
 
-#include "types.hpp"
+namespace arrayfire {
+namespace cuda {}  // namespace cuda
+}  // namespace arrayfire
 
-namespace detail = cuda;
+namespace detail = arrayfire::cuda;

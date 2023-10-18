@@ -8,254 +8,184 @@
  ********************************************************/
 
 #include <memory.hpp>
+
+#include <Event.hpp>
+#include <common/Logger.hpp>
+#include <common/MemoryManagerBase.hpp>
+#include <common/dispatch.hpp>
+#include <common/half.hpp>
+#include <common/util.hpp>
 #include <cuda.h>
-#include <cuda_runtime_api.h>
 #include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
 #include <err_cuda.hpp>
-#include <util.hpp>
-#include <types.hpp>
-#include <iostream>
-#include <iomanip>
-#include <string>
-#include <map>
-#include <dispatch.hpp>
 #include <platform.hpp>
-#include <MemoryManager.hpp>
+#include <spdlog/spdlog.h>
+#include <types.hpp>
+#include <af/dim4.hpp>
 
+#include <cstdlib>
+#include <mutex>
 
-#ifndef AF_MEM_DEBUG
-#define AF_MEM_DEBUG 0
-#endif
+using af::dim4;
+using arrayfire::common::bytesToString;
+using arrayfire::common::half;
 
-#ifndef AF_CUDA_MEM_DEBUG
-#define AF_CUDA_MEM_DEBUG 0
-#endif
+using std::move;
 
-namespace cuda
-{
-
-class MemoryManager  : public common::MemoryManager
-{
-    int getActiveDeviceId();
-    size_t getMaxMemorySize(int id);
-public:
-    MemoryManager();
-    void *nativeAlloc(const size_t bytes);
-    void nativeFree(void *ptr);
-    ~MemoryManager()
-    {
-        common::lock_guard_t lock(this->memory_mutex);
-        for (int n = 0; n < getDeviceCount(); n++) {
-            try {
-                cuda::setDevice(n);
-                this->garbageCollect();
-            } catch(AfError err) {
-                continue; // Do not throw any errors while shutting down
-            }
-        }
-    }
-};
-
-// CUDA Pinned Memory does not depend on device
-// So we pass 1 as numDevices to the constructor so that it creates 1 vector
-// of memory_info
-// When allocating and freeing, it doesn't really matter which device is active
-class MemoryManagerPinned  : public common::MemoryManager
-{
-    int getActiveDeviceId();
-    size_t getMaxMemorySize(int id);
-public:
-    MemoryManagerPinned();
-    void *nativeAlloc(const size_t bytes);
-    void nativeFree(void *ptr);
-    ~MemoryManagerPinned()
-    {
-        common::lock_guard_t lock(this->memory_mutex);
-        this->garbageCollect();
-    }
-};
-
-int MemoryManager::getActiveDeviceId()
-{
-    return cuda::getActiveDeviceId();
+namespace arrayfire {
+namespace cuda {
+float getMemoryPressure() { return memoryManager().getMemoryPressure(); }
+float getMemoryPressureThreshold() {
+    return memoryManager().getMemoryPressureThreshold();
 }
 
-size_t MemoryManager::getMaxMemorySize(int id)
-{
-    return cuda::getDeviceMemorySize(id);
+bool jitTreeExceedsMemoryPressure(size_t bytes) {
+    return memoryManager().jitTreeExceedsMemoryPressure(bytes);
 }
 
-MemoryManager::MemoryManager() :
-    common::MemoryManager(getDeviceCount(), common::MAX_BUFFERS, AF_MEM_DEBUG || AF_CUDA_MEM_DEBUG)
-{
-    this->setMaxMemorySize();
+void setMemStepSize(size_t step_bytes) {
+    memoryManager().setMemStepSize(step_bytes);
 }
 
-void *MemoryManager::nativeAlloc(const size_t bytes)
-{
-    void *ptr = NULL;
-    CUDA_CHECK(cudaMalloc(&ptr, bytes));
-    return ptr;
-}
+size_t getMemStepSize() { return memoryManager().getMemStepSize(); }
 
-void MemoryManager::nativeFree(void *ptr)
-{
-    cudaError_t err = cudaFree(ptr);
-    if (err != cudaErrorCudartUnloading) {
-        CUDA_CHECK(err);
-    }
-}
+void signalMemoryCleanup() { memoryManager().signalMemoryCleanup(); }
 
-static MemoryManager &getMemoryManager()
-{
-    static MemoryManager instance;
-    return instance;
-}
+void shutdownMemoryManager() { memoryManager().shutdown(); }
 
-int MemoryManagerPinned::getActiveDeviceId()
-{
-    return 0; // pinned uses a single vector
-}
+void shutdownPinnedMemoryManager() { pinnedMemoryManager().shutdown(); }
 
-size_t MemoryManagerPinned::getMaxMemorySize(int id)
-{
-    return cuda::getHostMemorySize();
-}
-
-MemoryManagerPinned::MemoryManagerPinned() :
-    common::MemoryManager(1, common::MAX_BUFFERS, AF_MEM_DEBUG || AF_CUDA_MEM_DEBUG)
-{
-    this->setMaxMemorySize();
-}
-
-void *MemoryManagerPinned::nativeAlloc(const size_t bytes)
-{
-    void *ptr;
-    CUDA_CHECK(cudaMallocHost(&ptr, bytes));
-    return ptr;
-}
-
-void MemoryManagerPinned::nativeFree(void *ptr)
-{
-    cudaError_t err = cudaFreeHost(ptr);
-    if (err != cudaErrorCudartUnloading) {
-        CUDA_CHECK(err);
-    }
-}
-
-static MemoryManagerPinned &getMemoryManagerPinned()
-{
-    static MemoryManagerPinned instance;
-    return instance;
-}
-
-void setMemStepSize(size_t step_bytes)
-{
-    getMemoryManager().setMemStepSize(step_bytes);
-}
-
-size_t getMemStepSize(void)
-{
-    return getMemoryManager().getMemStepSize();
-}
-
-size_t getMaxBytes()
-{
-    return getMemoryManager().getMaxBytes();
-}
-
-unsigned getMaxBuffers()
-{
-    return getMemoryManager().getMaxBuffers();
-}
-
-void garbageCollect()
-{
-    getMemoryManager().garbageCollect();
-}
-
-void printMemInfo(const char *msg, const int device)
-{
-    getMemoryManager().printInfo(msg, device);
+void printMemInfo(const char *msg, const int device) {
+    memoryManager().printInfo(msg, device);
 }
 
 template<typename T>
-T* memAlloc(const size_t &elements)
-{
-    return (T *)getMemoryManager().alloc(elements * sizeof(T), false);
+uptr<T> memAlloc(const size_t &elements) {
+    // TODO: make memAlloc aware of array shapes
+    dim4 dims(elements);
+    void *ptr = memoryManager().alloc(false, 1, dims.get(), sizeof(T));
+    return uptr<T>(static_cast<T *>(ptr), memFree);
 }
 
-void* memAllocUser(const size_t &bytes)
-{
-    return getMemoryManager().alloc(bytes, true);
-}
-template<typename T>
-void memFree(T *ptr)
-{
-    return getMemoryManager().unlock((void *)ptr, false);
+void *memAllocUser(const size_t &bytes) {
+    dim4 dims(bytes);
+    void *ptr = memoryManager().alloc(true, 1, dims.get(), 1);
+    return ptr;
 }
 
-void memFreeUser(void *ptr)
-{
-    getMemoryManager().unlock((void *)ptr, true);
+void memFree(void *ptr) { memoryManager().unlock(ptr, false); }
+
+void memFreeUser(void *ptr) { memoryManager().unlock(ptr, true); }
+
+void memLock(const void *ptr) {
+    memoryManager().userLock(const_cast<void *>(ptr));
 }
 
-void memLock(const void *ptr)
-{
-    getMemoryManager().userLock((void *)ptr);
+void memUnlock(const void *ptr) {
+    memoryManager().userUnlock(const_cast<void *>(ptr));
 }
 
-void memUnlock(const void *ptr)
-{
-    getMemoryManager().userUnlock((void *)ptr);
-}
-
-bool isLocked(const void *ptr)
-{
-    return getMemoryManager().isUserLocked((void *)ptr);
+bool isLocked(const void *ptr) {
+    return memoryManager().isUserLocked(const_cast<void *>(ptr));
 }
 
 void deviceMemoryInfo(size_t *alloc_bytes, size_t *alloc_buffers,
-                      size_t *lock_bytes,  size_t *lock_buffers)
-{
-    getMemoryManager().bufferInfo(alloc_bytes, alloc_buffers,
-                                  lock_bytes,  lock_buffers);
+                      size_t *lock_bytes, size_t *lock_buffers) {
+    memoryManager().usageInfo(alloc_bytes, alloc_buffers, lock_bytes,
+                              lock_buffers);
 }
 
 template<typename T>
-T* pinnedAlloc(const size_t &elements)
-{
-    return (T *)getMemoryManagerPinned().alloc(elements * sizeof(T), false);
+T *pinnedAlloc(const size_t &elements) {
+    // TODO: make pinnedAlloc aware of array shapes
+    dim4 dims(elements);
+    void *ptr = pinnedMemoryManager().alloc(false, 1, dims.get(), sizeof(T));
+    return static_cast<T *>(ptr);
 }
 
-template<typename T>
-void pinnedFree(T* ptr)
-{
-    return getMemoryManagerPinned().unlock((void *)ptr, false);
+void pinnedFree(void *ptr) { pinnedMemoryManager().unlock(ptr, false); }
+
+#define INSTANTIATE(T)                                 \
+    template uptr<T> memAlloc(const size_t &elements); \
+    template T *pinnedAlloc(const size_t &elements);
+
+INSTANTIATE(float)
+INSTANTIATE(cfloat)
+INSTANTIATE(double)
+INSTANTIATE(cdouble)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(char)
+INSTANTIATE(uchar)
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+INSTANTIATE(half)
+
+template<>
+void *pinnedAlloc<void>(const size_t &elements) {
+    // TODO: make pinnedAlloc aware of array shapes
+    dim4 dims(elements);
+    void *ptr = pinnedMemoryManager().alloc(false, 1, dims.get(), 1);
+    return ptr;
 }
 
-bool checkMemoryLimit()
-{
-    return getMemoryManager().checkMemoryLimit();
+Allocator::Allocator() { logger = common::loggerFactory("mem"); }
+
+void Allocator::shutdown() {
+    for (int n = 0; n < getDeviceCount(); n++) {
+        try {
+            setDevice(n);
+            shutdownMemoryManager();
+        } catch (const AfError &err) {
+            continue;  // Do not throw any errors while shutting down
+        }
+    }
 }
 
-#define INSTANTIATE(T)                                      \
-    template T* memAlloc(const size_t &elements);           \
-    template void memFree(T* ptr);                          \
-    template T* pinnedAlloc(const size_t &elements);        \
-    template void pinnedFree(T* ptr);                       \
+int Allocator::getActiveDeviceId() { return cuda::getActiveDeviceId(); }
 
-    INSTANTIATE(float)
-    INSTANTIATE(cfloat)
-    INSTANTIATE(double)
-    INSTANTIATE(cdouble)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(char)
-    INSTANTIATE(uchar)
-    INSTANTIATE(intl)
-    INSTANTIATE(uintl)
-    INSTANTIATE(short)
-    INSTANTIATE(ushort)
+size_t Allocator::getMaxMemorySize(int id) { return getDeviceMemorySize(id); }
 
+void *Allocator::nativeAlloc(const size_t bytes) {
+    void *ptr = NULL;
+    CUDA_CHECK(cudaMalloc(&ptr, bytes));
+    AF_TRACE("nativeAlloc: {:>7} {}", bytesToString(bytes), ptr);
+    return ptr;
 }
+
+void Allocator::nativeFree(void *ptr) {
+    AF_TRACE("nativeFree:          {}", ptr);
+    cudaError_t err = cudaFree(ptr);
+    if (err != cudaErrorCudartUnloading) { CUDA_CHECK(err); }
+}
+
+AllocatorPinned::AllocatorPinned() { logger = common::loggerFactory("mem"); }
+
+void AllocatorPinned::shutdown() { shutdownPinnedMemoryManager(); }
+
+int AllocatorPinned::getActiveDeviceId() {
+    return 0;  // pinned uses a single vector
+}
+
+size_t AllocatorPinned::getMaxMemorySize(int id) {
+    UNUSED(id);
+    return getHostMemorySize();
+}
+
+void *AllocatorPinned::nativeAlloc(const size_t bytes) {
+    void *ptr;
+    CUDA_CHECK(cudaMallocHost(&ptr, bytes));
+    AF_TRACE("Pinned::nativeAlloc: {:>7} {}", bytesToString(bytes), ptr);
+    return ptr;
+}
+
+void AllocatorPinned::nativeFree(void *ptr) {
+    AF_TRACE("Pinned::nativeFree:          {}", ptr);
+    cudaError_t err = cudaFreeHost(ptr);
+    if (err != cudaErrorCudartUnloading) { CUDA_CHECK(err); }
+}
+}  // namespace cuda
+}  // namespace arrayfire

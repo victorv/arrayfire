@@ -7,37 +7,34 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
-#include <interopManager.hpp>
 #include <Array.hpp>
-#include <surface.hpp>
-#include <err_opencl.hpp>
+#include <GraphicsResourceManager.hpp>
 #include <debug_opencl.hpp>
-#include <join.hpp>
-#include <reduce.hpp>
-#include <reorder.hpp>
+#include <err_opencl.hpp>
+#include <surface.hpp>
 
 using af::dim4;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+using cl::Memory;
+using std::vector;
 
-namespace opencl
-{
-using namespace gl;
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
-void copy_surface(const Array<T> &P, forge::Surface* surface)
-{
+void copy_surface(const Array<T> &P, fg_surface surface) {
+    ForgeModule &_ = forgePlugin();
     if (isGLSharingSupported()) {
         CheckGL("Begin OpenCL resource copy");
         const cl::Buffer *d_P = P.get();
-        size_t bytes = surface->verticesSize();
+        unsigned bytes        = 0;
+        FG_CHECK(_.fg_get_surface_vertex_buffer_size(&bytes, surface));
 
-        InteropManager& intrpMngr = InteropManager::getInstance();
+        auto res = interopManager().getSurfaceResources(surface);
 
-        cl::Buffer **resources = intrpMngr.getBufferResource(surface);
-
-        std::vector<cl::Memory> shared_objects;
-        shared_objects.push_back(*resources[0]);
+        vector<Memory> shared_objects;
+        shared_objects.push_back(*(res[0].get()));
 
         glFinish();
 
@@ -47,18 +44,24 @@ void copy_surface(const Array<T> &P, forge::Surface* surface)
 
         getQueue().enqueueAcquireGLObjects(&shared_objects, NULL, &event);
         event.wait();
-        getQueue().enqueueCopyBuffer(*d_P, *resources[0], 0, 0, bytes, NULL, &event);
+        getQueue().enqueueCopyBuffer(*d_P, *(res[0].get()), 0, 0, bytes, NULL,
+                                     &event);
         getQueue().enqueueReleaseGLObjects(&shared_objects, NULL, &event);
         event.wait();
 
         CL_DEBUG_FINISH(getQueue());
         CheckGL("End OpenCL resource copy");
     } else {
+        unsigned bytes = 0, buffer = 0;
+        FG_CHECK(_.fg_get_surface_vertex_buffer(&buffer, surface));
+        FG_CHECK(_.fg_get_surface_vertex_buffer_size(&bytes, surface));
+
         CheckGL("Begin OpenCL fallback-resource copy");
-        glBindBuffer(GL_ARRAY_BUFFER, surface->vertices());
-        GLubyte* ptr = (GLubyte*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+        auto *ptr =
+            static_cast<GLubyte *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
         if (ptr) {
-            getQueue().enqueueReadBuffer(*P.get(), CL_TRUE, 0, surface->verticesSize(), ptr);
+            getQueue().enqueueReadBuffer(*P.get(), CL_TRUE, 0, bytes, ptr);
             glUnmapBuffer(GL_ARRAY_BUFFER);
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -66,8 +69,8 @@ void copy_surface(const Array<T> &P, forge::Surface* surface)
     }
 }
 
-#define INSTANTIATE(T)  \
-    template void copy_surface<T>(const Array<T> &P, forge::Surface* surface);
+#define INSTANTIATE(T) \
+    template void copy_surface<T>(const Array<T> &, fg_surface);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -77,6 +80,5 @@ INSTANTIATE(short)
 INSTANTIATE(ushort)
 INSTANTIATE(uchar)
 
-}
-
-#endif  // WITH_GRAPHICS
+}  // namespace opencl
+}  // namespace arrayfire

@@ -8,80 +8,55 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/histogram.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/histogram.hpp>
+#include <traits.hpp>
 
-using cl::Kernel;
-using cl::KernelFunctor;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace kernel
-{
+template<typename T>
+void histogram(Param out, const Param in, int nbins, float minval, float maxval,
+               bool isLinear) {
+    constexpr int MAX_BINS  = 4000;
+    constexpr int THREADS_X = 256;
+    constexpr int THRD_LOAD = 16;
 
-static const unsigned MAX_BINS  = 4000;
-static const int THREADS_X =  256;
-static const int THRD_LOAD =   16;
+    std::array<TemplateArg, 2> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(isLinear),
+    };
+    std::vector<std::string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(THRD_LOAD),
+        DefineValue(MAX_BINS),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
+    if (isLinear) { options.emplace_back(DefineKey(IS_LINEAR)); }
 
-template<typename inType, typename outType, bool isLinear>
-void histogram(Param out, const Param in, int nbins, float minval, float maxval)
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*> histProgs;
-        static std::map<int, Kernel *> histKernels;
+    auto histogram =
+        common::getKernel("histogram", {{histogram_cl_src}}, targs, options);
 
-        int device = getActiveDeviceId();
+    int nElems  = in.info.dims[0] * in.info.dims[1];
+    int blk_x   = divup(nElems, THRD_LOAD * THREADS_X);
+    int locSize = nbins <= MAX_BINS ? (nbins * sizeof(uint)) : 1;
 
-        std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D inType=" << dtype_traits<inType>::getName()
-                            << " -D outType=" << dtype_traits<outType>::getName()
-                            << " -D THRD_LOAD=" << THRD_LOAD;
-                    if (isLinear)
-                        options << " -D IS_LINEAR";
-                    if (std::is_same<inType, double>::value ||
-                        std::is_same<inType, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
+    cl::NDRange local(THREADS_X, 1);
+    cl::NDRange global(blk_x * in.info.dims[2] * THREADS_X, in.info.dims[3]);
 
-                    Program prog;
-                    buildProgram(prog, histogram_cl, histogram_cl_len, options.str());
-                    histProgs[device]   = new Program(prog);
-                    histKernels[device] = new Kernel(*histProgs[device], "histogram");
-                });
-
-        auto histogramOp = KernelFunctor<Buffer, KParam, Buffer, KParam,
-                                       cl::LocalSpaceArg,
-                                       int, int, float, float, int
-                                      >(*histKernels[device]);
-
-        int nElems = in.info.dims[0]*in.info.dims[1];
-        int blk_x  = divup(nElems, THRD_LOAD*THREADS_X);
-        int locSize = nbins * sizeof(outType);
-
-        NDRange local(THREADS_X, 1);
-        NDRange global(blk_x*in.info.dims[2]*THREADS_X, in.info.dims[3]);
-
-        histogramOp(EnqueueArgs(getQueue(), global, local),
-                *out.data, out.info, *in.data, in.info,
-                cl::Local(locSize), nElems, nbins, minval, maxval, blk_x);
-
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
-    }
+    histogram(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+              *in.data, in.info, cl::Local(locSize), nElems, nbins, minval,
+              maxval, blk_x);
+    CL_DEBUG_FINISH(getQueue());
 }
-
-}
-
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

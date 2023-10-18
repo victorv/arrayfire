@@ -18,15 +18,17 @@ achieve high throughput on most parallel architectures.
 
 ArrayFire provides one generic container object, the [array](\ref af::array)
 on which functions and mathematical operations are performed. The `array`
-can represent one of many different [basic data types](\ref af::af_dtype):
+can represent one of many different [basic data types](\ref af_dtype):
 
-* [b8](\ref b8) 8-bit boolean values (`bool`)
 * [f32](\ref f32) real single-precision (`float`)
 * [c32](\ref c32) complex single-precision (`cfloat`)
-* [s32](\ref s32) 32-bit signed integer (`int`)
-* [u32](\ref u32) 32-bit unsigned integer (`unsigned`)
 * [f64](\ref f64) real double-precision (`double`)
 * [c64](\ref c64) complex double-precision (`cdouble`)
+* [f16](\ref f16) real half-precision (`half_float::half`)
+* [b8](\ref b8) 8-bit boolean values (`bool`)
+* [s32](\ref s32) 32-bit signed integer (`int`)
+* [u32](\ref u32) 32-bit unsigned integer (`unsigned`)
+* [u8](\ref u8) 8-bit unsigned values (`unsigned char`)
 * [s64](\ref s64) 64-bit signed integer (`intl`)
 * [u64](\ref u64) 64-bit unsigned integer (`uintl`)
 * [s16](\ref s16) 16-bit signed integer (`short`)
@@ -47,7 +49,7 @@ which cannot freed until the `array` object goes out of scope. As device memory
 allocation can be expensive, ArrayFire also includes a memory manager which
 will re-use device memory whenever possible.
 
-Arrays can be created using one of the [array constructors](\ref #construct_mat).
+Arrays can be created using one of the [array constructors](\ref af::array).
 Below we show how to create 1D, 2D, and 3D arrays with uninitialized values:
 
 \snippet test/getting_started.cpp ex_getting_started_constructors
@@ -86,7 +88,7 @@ ArrayFire provides several functions to determine various aspects of arrays.
 This includes functions to print the contents, query the dimensions, and
 determine various other aspects of arrays.
 
-The [af_print](\ref af::af_print) function can be used to print arrays that
+The [af_print](\ref af_print) function can be used to print arrays that
 have already been generated or any expression involving arrays:
 
 \snippet test/getting_started.cpp ex_getting_started_print
@@ -152,11 +154,11 @@ using the `af::` namespace.
 
 # Indexing {#getting_started_indexing}
 
-Like all functions in ArrayFire, indexing is also executed in parallel on
-the OpenCL/CUDA device.
-Because of this, indexing becomes part of a JIT operation and is accomplished
-using parentheses instead of square brackets (i.e. as `A(0)` instead of `A[0]`).
-To index `af::array`s you may use one or a combination of the following functions:
+Like all functions in ArrayFire, indexing is also executed in parallel on the
+OpenCL/CUDA devices. Because of this, indexing becomes part of a JIT operation
+and is accomplished using parentheses instead of square brackets (i.e. as `A(0)`
+instead of `A[0]`). To index `af::array`s you may use one or a combination of
+the following functions:
 
 * integer scalars
 * [seq()](\ref af::seq) representing a linear sequence
@@ -213,15 +215,16 @@ simply include the `arrayfire.h` header file and start coding!
     int main(void)
     {
         // generate random values
-        int n = 10000;
         af_array a;
-        af_randu(&a, n);
+        int n_dims = 1;
+        dim_t dims[] = {10000};
+        af_randu(&a, n_dims, dims, f32);
 
         // sum all the values
-        float result;
-        af_sum_all(&result, a, 0);
+        double result;
+        af_sum_all(&result, 0, a);
+        printf("sum: %g\n", result);
 
-        printf("sum: %g\n", sum);
         return 0;
     }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

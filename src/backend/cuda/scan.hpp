@@ -8,10 +8,11 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <ops.hpp>
+#include <optypes.hpp>
 
-namespace cuda
-{
-    template<af_op_t op, typename Ti, typename To>
-    Array<To> scan(const Array<Ti>& in, const int dim, bool inclusive_scan = true);
-}
+namespace arrayfire {
+namespace cuda {
+template<af_op_t op, typename Ti, typename To>
+Array<To> scan(const Array<Ti>& in, const int dim, bool inclusive_scan = true);
+}  // namespace cuda
+}  // namespace arrayfire

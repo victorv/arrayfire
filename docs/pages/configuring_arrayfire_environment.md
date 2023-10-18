@@ -38,6 +38,16 @@ variable are the device identifiers shown when af::info is run.
 AF_CUDA_DEFAULT_DEVICE=1 ./myprogram_cuda
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+AF_ONEAPI_DEFAULT_DEVICE {#af_oneapi_default_device}
+-------------------------------------------------------------------------------
+
+Use this variable to set the default oneAPI device. Valid values for this
+variable are the device identifiers shown when af::info is run.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+AF_ONEAPI_DEFAULT_DEVICE=1 ./myprogram_oneapi
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Note: af::setDevice call in the source code will take precedence over this
 variable.
 
@@ -145,36 +155,120 @@ paths, then those paths are shown in full.
 AF_MEM_DEBUG {#af_mem_debug}
 -------------------------------------------------------------------------------
 
-When AF_MEM_DEBUG is set to 1 (or anything not equal to 0), the caching mechanism in the memory manager is disabled.
-The device buffers are allocated using native functions as needed and freed when going out of scope.
+When AF_MEM_DEBUG is set to 1 (or anything not equal to 0), the caching
+mechanism in the memory manager is disabled. The device buffers are allocated
+using native functions as needed and freed when going out of scope.
 
-When the environment variable is not set, it is treated to be non zero.
+When the environment variable is not set, it is treated to be zero.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 AF_MEM_DEBUG=1 ./myprogram
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+AF_TRACE {#af_trace}
+-------------------------------------------------------------------------------
+
+If ArrayFire was built with logging support, this enviornment variable will
+enable tracing of various modules within ArrayFire. This is a comma separated
+list of modules to trace. If enabled, ArrayFire will print relevant information
+to stdout. Currently the following modules are supported:
+
+- all: All trace outputs
+- jit: Logs kernel fetch & respective compile options and any errors.
+- mem: Memory management allocation, free and garbage collection information
+- platform: Device management information
+- unified: Unified backend dynamic loading information
+
+Tracing displays the information that could be useful when debugging or
+optimizing your application. Here is how you would use this variable:
+
+    AF_TRACE=mem,unified ./myprogram
+
+This will print information about memory operations such as allocations,
+deallocations, and garbage collection.
+
+All trace statements printed to the console have a suffix with the following
+pattern.
+
+**[category][Seconds since Epoch][Thread Id][source file relative path] \<Message\>**
 
 AF_MAX_BUFFERS {#af_max_buffers}
 -------------------------------------------------------------------------
 
-When AF_MAX_BUFFERS is set, this environment variable specifies the maximum number of buffers allocated before garbage collection kicks in.
+When AF_MAX_BUFFERS is set, this environment variable specifies the maximum
+number of buffers allocated before garbage collection kicks in.
 
-Please note that the total number of buffers that can exist simultaneously can be higher than this number. This variable tells the garbage collector that it should free any available buffers immediately if the treshold is reached.
+Please note that the total number of buffers that can exist simultaneously can
+be higher than this number. This variable tells the garbage collector that it
+should free any available buffers immediately if the treshold is reached.
 
 When not set, the default value is 1000.
 
 AF_OPENCL_MAX_JIT_LEN {#af_opencl_max_jit_len}
 -------------------------------------------------------------------------------
 
-When set, this environment variable specifies the maximum height of the OpenCL JIT tree after which evaluation is forced. The default value for this is 100 as of v3.4 (20 for older versions).
+When set, this environment variable specifies the maximum height of the OpenCL
+JIT tree after which evaluation is forced.
+
+The default value, as of v3.4, is 50 on OSX, 100 everywhere else. This value was
+20 for older versions.
 
 AF_CUDA_MAX_JIT_LEN {#af_cuda_max_jit_len}
 -------------------------------------------------------------------------------
 
-When set, this environment variable specifies the maximum height of the CUDA JIT tree after which evaluation is forced. The default value for this is 100 as of v3.4 (20 for older versions).
+When set, this environment variable specifies the maximum height of the CUDA JIT
+tree after which evaluation is forced.
+
+The default value, as of v3.4, 100. This value was 20 for older versions.
 
 AF_CPU_MAX_JIT_LEN {#af_cpu_max_jit_len}
 -------------------------------------------------------------------------------
 
-When set, this environment variable specifies the maximum length of the CPU JIT tree after which evaluation is forced. The default value for this is 100 as of v3.4 (20 for older versions).
+When set, this environment variable specifies the maximum length of the CPU JIT
+tree after which evaluation is forced.
+
+The default value, as of v3.4, 100. This value was 20 for older versions.
+
+AF_BUILD_LIB_CUSTOM_PATH {#af_build_lib_custom_path}
+-------------------------------------------------------------------------------
+
+When set, this environment variable specifies a custom path along which the
+symbol manager will search for dynamic (shared library) backends to load. This
+is useful for specialized build configurations that use the unified backend and
+build shared libraries separately.
+
+By default, no additional path will be searched for an empty value.
+
+
+AF_JIT_KERNEL_TRACE {#af_jit_kernel_trace}
+-------------------------------------------------------------------------------
+
+When set, this environment variable has to be set to one of the following
+three values:
+
+- stdout : generated kernels will be printed to standard output
+- stderr : generated kernels will be printed to standard error stream
+- absolute path to a folder on the disk where generated kernels will be stored
+
+CUDA backend kernels are stored in files with cu file extension.
+
+OpenCL backend kernels are stored in files with cl file extension.
+
+AF_JIT_KERNEL_CACHE_DIRECTORY {#af_jit_kernel_cache_directory}
+-------------------------------------------------------------------------------
+
+This variable sets the path to the ArrayFire cache on the filesystem. If set
+ArrayFire will write the kernels that are compiled at runtime to this directory.
+If the path is not writeable, the default path is used.
+
+This path is different from AF_JIT_KERNEL_TRACE which stores strings. These
+kernels will store binaries and the content will be dependent on the
+backend and platforms used.
+
+The default path is determined in the following order:
+  Unix:
+      1. $HOME/.arrayfire
+      2. /tmp/arrayfire
+  Windows:
+      1. ArrayFire application Temp folder(Usually
+          C:\\Users\\\<user_name\>\\AppData\\Local\\Temp\\ArrayFire)

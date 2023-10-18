@@ -8,113 +8,130 @@
  ********************************************************/
 
 #pragma once
-#include <af/array.h>
 #include <Array.hpp>
 #include <backend.hpp>
-#include <err_common.hpp>
-#include <math.hpp>
+#include <common/err_common.hpp>
+#include <common/traits.hpp>
 #include <copy.hpp>
-#include <cast.hpp>
+#include <math.hpp>
+#include <types.hpp>
+
+#include <af/array.h>
+#include <af/defines.h>
 #include <af/dim4.hpp>
 
-const ArrayInfo& getInfo(const af_array arr, bool sparse_check = true, bool device_check = true);
+namespace arrayfire {
 
-// Implemented in src/api/c/moddims.cpp
-template<typename T>
-detail::Array<T> modDims(const detail::Array<T>& in, const af::dim4 &newDims);
+af_array retain(const af_array in);
+
+af::dim4 verifyDims(const unsigned ndims, const dim_t *const dims);
+
+af_array createHandle(const af::dim4 &d, af_dtype dtype);
+
+af_array createHandleFromValue(const af::dim4 &d, double val, af_dtype dtype);
+
+/// This function creates an af_array handle from memory handle on the device.
+///
+/// \param[in] d The shape of the new af_array
+/// \param[in] dtype The type of the new af_array
+/// \param[in] data The handle to the device memory
+/// \returns a new af_array with a view to the \p data pointer
+af_array createHandleFromDeviceData(const af::dim4 &d, af_dtype dtype,
+                                    void *data);
+
+namespace common {
+const ArrayInfo &getInfo(const af_array arr, bool sparse_check = true);
+
+template<typename To>
+detail::Array<To> castArray(const af_array &in);
+
+}  // namespace common
 
 template<typename T>
-static const detail::Array<T> &
-getArray(const af_array &arr)
-{
-    detail::Array<T> *A = reinterpret_cast<detail::Array<T>*>(arr);
-    ARG_ASSERT(0, A->isSparse() == false);
+const detail::Array<T> &getArray(const af_array &arr) {
+    const detail::Array<T> *A = static_cast<const detail::Array<T> *>(arr);
+    if ((af_dtype)af::dtype_traits<T>::af_type != A->getType())
+        AF_ERROR("Invalid type for input array.", AF_ERR_INTERNAL);
+    checkAndMigrate(*const_cast<detail::Array<T> *>(A));
     return *A;
 }
 
-template<typename To>
-detail::Array<To> castArray(const af_array &in)
-{
-    using detail::cfloat;
-    using detail::cdouble;
-    using detail::uint;
-    using detail::uchar;
-    using detail::ushort;
+template<typename T>
+detail::Array<T> &getArray(af_array &arr) {
+    detail::Array<T> *A = static_cast<detail::Array<T> *>(arr);
+    if ((af_dtype)af::dtype_traits<T>::af_type != A->getType())
+        AF_ERROR("Invalid type for input array.", AF_ERR_INTERNAL);
+    checkAndMigrate(*A);
+    return *A;
+}
 
-    const ArrayInfo info = getInfo(in);
-    switch (info.getType()) {
-    case f32: return detail::cast<To, float  >(getArray<float  >(in));
-    case f64: return detail::cast<To, double >(getArray<double >(in));
-    case c32: return detail::cast<To, cfloat >(getArray<cfloat >(in));
-    case c64: return detail::cast<To, cdouble>(getArray<cdouble>(in));
-    case s32: return detail::cast<To, int    >(getArray<int    >(in));
-    case u32: return detail::cast<To, uint   >(getArray<uint   >(in));
-    case u8 : return detail::cast<To, uchar  >(getArray<uchar  >(in));
-    case b8 : return detail::cast<To, char   >(getArray<char   >(in));
-    case s64: return detail::cast<To, intl   >(getArray<intl   >(in));
-    case u64: return detail::cast<To, uintl  >(getArray<uintl  >(in));
-    case s16: return detail::cast<To, short  >(getArray<short  >(in));
-    case u16: return detail::cast<To, ushort >(getArray<ushort >(in));
-    default: TYPE_ERROR(1, info.getType());
-    }
+/// Returns the use count
+///
+/// \note This function is called separately because we cannot call getArray in
+/// case the data was built on a different context. so we are avoiding the check
+/// and migrate function
+template<typename T>
+int getUseCount(const af_array &arr) {
+    detail::Array<T> *A = static_cast<detail::Array<T> *>(arr);
+    return A->useCount();
 }
 
 template<typename T>
-static detail::Array<T> &
-getWritableArray(const af_array &arr)
-{
-    const detail::Array<T> &A = getArray<T>(arr);
-    ARG_ASSERT(0, A.isSparse() == false);
-    return const_cast<detail::Array<T>&>(A);
+af_array getHandle(const detail::Array<T> &A) {
+    detail::Array<T> *ret = new detail::Array<T>(A);
+    return static_cast<af_array>(ret);
 }
 
 template<typename T>
-static af_array
-getHandle(const detail::Array<T> &A)
-{
-    detail::Array<T> *ret = detail::initArray<T>();
-    *ret = A;
-    af_array arr = reinterpret_cast<af_array>(ret);
-    return arr;
+af_array retainHandle(const af_array in) {
+    detail::Array<T> *A   = static_cast<detail::Array<T> *>(in);
+    detail::Array<T> *out = new detail::Array<T>(*A);
+    return static_cast<af_array>(out);
 }
 
 template<typename T>
-static af_array createHandle(af::dim4 d)
-{
+af_array createHandle(const af::dim4 &d) {
     return getHandle(detail::createEmptyArray<T>(d));
 }
 
 template<typename T>
-static af_array createHandleFromValue(af::dim4 d, double val)
-{
+af_array createHandleFromValue(const af::dim4 &d, double val) {
     return getHandle(detail::createValueArray<T>(d, detail::scalar<T>(val)));
 }
 
 template<typename T>
-static af_array createHandleFromData(af::dim4 d, const T * const data)
-{
+af_array createHandleFromData(const af::dim4 &d, const T *const data) {
     return getHandle(detail::createHostDataArray<T>(d, data));
 }
 
 template<typename T>
-static void copyData(T *data, const af_array &arr)
-{
+void copyData(T *data, const af_array &arr) {
     return detail::copyData(data, getArray<T>(arr));
 }
 
 template<typename T>
-static af_array copyArray(const af_array in)
-{
+af_array copyArray(const af_array in) {
     const detail::Array<T> &inArray = getArray<T>(in);
     return getHandle<T>(detail::copyArray<T>(inArray));
 }
 
 template<typename T>
-static void releaseHandle(const af_array arr)
-{
-    detail::destroyArray(reinterpret_cast<detail::Array<T>*>(arr));
-}
+void releaseHandle(const af_array arr);
 
-af_array retain(const af_array in);
+template<typename T>
+detail::Array<T> &getCopyOnWriteArray(const af_array &arr);
 
-af::dim4 verifyDims(const unsigned ndims, const dim_t * const dims);
+}  // namespace arrayfire
+
+using arrayfire::copyArray;
+using arrayfire::copyData;
+using arrayfire::createHandle;
+using arrayfire::createHandleFromData;
+using arrayfire::createHandleFromValue;
+using arrayfire::getArray;
+using arrayfire::getHandle;
+using arrayfire::releaseHandle;
+using arrayfire::retain;
+using arrayfire::verifyDims;
+using arrayfire::common::castArray;
+using arrayfire::common::getInfo;

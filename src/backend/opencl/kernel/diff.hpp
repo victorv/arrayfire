@@ -8,83 +8,55 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/diff.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/diff.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-    namespace kernel
-    {
-        static const int TX = 16;
-        static const int TY = 16;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-        template<typename T, unsigned dim, bool isDiff2>
-        void diff(Param out, const Param in, const unsigned indims)
-        {
-            try {
-                static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-                static std::map<int, Program*>   diffProgs;
-                static std::map<int, Kernel*>  diffKernels;
+template<typename T>
+void diff(Param out, const Param in, const unsigned indims, const unsigned dim,
+          const bool isDiff2) {
+    constexpr int TX = 16;
+    constexpr int TY = 16;
 
-                int device = getActiveDeviceId();
+    std::array<TemplateArg, 3> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(dim),
+        TemplateArg(isDiff2),
+    };
+    std::array<std::string, 4> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()), DefineKeyValue(DIM, dim),
+        DefineKeyValue(isDiff2, (isDiff2 ? 1 : 0)),
+        getTypeBuildDefinition<T>()};
 
-                std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D T="        << dtype_traits<T>::getName()
-                            << " -D DIM="      << dim
-                            << " -D isDiff2=" << isDiff2;
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, diff_cl, diff_cl_len, options.str());
-                    diffProgs[device]   = new Program(prog);
-                    diffKernels[device] = new Kernel(*diffProgs[device], "diff_kernel");
-                });
+    auto diffOp =
+        common::getKernel("diff_kernel", {{diff_cl_src}}, targs, options);
 
-                auto diffOp = KernelFunctor<Buffer, const Buffer, const KParam, const KParam,
-                                          const int, const int, const int>
-                                          (*diffKernels[device]);
+    cl::NDRange local(TX, TY, 1);
+    if (dim == 0 && indims == 1) { local = cl::NDRange(TX * TY, 1, 1); }
 
-                NDRange local(TX, TY, 1);
-                if(dim == 0 && indims == 1) {
-                    local = NDRange(TX * TY, 1, 1);
-                }
+    int blocksPerMatX = divup(out.info.dims[0], local[0]);
+    int blocksPerMatY = divup(out.info.dims[1], local[1]);
+    cl::NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
+                       local[1] * blocksPerMatY * out.info.dims[3], 1);
 
-                int blocksPerMatX = divup(out.info.dims[0], local[0]);
-                int blocksPerMatY = divup(out.info.dims[1], local[1]);
-                NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
-                               local[1] * blocksPerMatY * out.info.dims[3],
-                               1);
+    const int oElem = out.info.dims[0] * out.info.dims[1] * out.info.dims[2] *
+                      out.info.dims[3];
 
-                const int oElem = out.info.dims[0] * out.info.dims[1]
-                                     * out.info.dims[2] * out.info.dims[3];
-
-                diffOp(EnqueueArgs(getQueue(), global, local),
-                       *out.data, *in.data, out.info, in.info,
-                       oElem, blocksPerMatX, blocksPerMatY);
-
-                CL_DEBUG_FINISH(getQueue());
-            } catch (cl::Error err) {
-                CL_TO_AF_ERROR(err);
-                throw;
-            }
-        }
-    }
+    diffOp(cl::EnqueueArgs(getQueue(), global, local), *out.data, *in.data,
+           out.info, in.info, oElem, blocksPerMatX, blocksPerMatY);
+    CL_DEBUG_FINISH(getQueue());
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

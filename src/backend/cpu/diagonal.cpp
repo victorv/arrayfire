@@ -7,25 +7,30 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/dim4.hpp>
-#include <Array.hpp>
 #include <diagonal.hpp>
-#include <math.hpp>
-#include <err_cpu.hpp>
-#include <platform.hpp>
-#include <queue.hpp>
 #include <kernel/diagonal.hpp>
 
-namespace cpu
-{
+#include <Array.hpp>
+#include <common/half.hpp>
+#include <platform.hpp>
+#include <af/defines.h>
+#include <af/dim4.hpp>
+
+#include <algorithm>
+#include <cstdlib>
+
+using arrayfire::common::half;  // NOLINT(misc-unused-using-decls) bug in
+                                // clang-tidy
+using std::abs;  // NOLINT(misc-unused-using-decls) bug in clang-tidy
+using std::min;  // NOLINT(misc-unused-using-decls) bug in clang-tidy
+
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-Array<T> diagCreate(const Array<T> &in, const int num)
-{
-    in.eval();
-
-    int size = in.dims()[0] + std::abs(num);
-    int batch = in.dims()[1];
+Array<T> diagCreate(const Array<T> &in, const int num) {
+    int size     = in.dims()[0] + abs(num);
+    int batch    = in.dims()[1];
     Array<T> out = createEmptyArray<T>(dim4(size, size, batch));
 
     getQueue().enqueue(kernel::diagCreate<T>, out, in, num);
@@ -34,13 +39,10 @@ Array<T> diagCreate(const Array<T> &in, const int num)
 }
 
 template<typename T>
-Array<T> diagExtract(const Array<T> &in, const int num)
-{
-    in.eval();
-
-    const dim4 idims = in.dims();
-    dim_t size = std::min(idims[0], idims[1]) - std::abs(num);
-    Array<T> out = createEmptyArray<T>(dim4(size, 1, idims[2], idims[3]));
+Array<T> diagExtract(const Array<T> &in, const int num) {
+    const dim4 &idims = in.dims();
+    dim_t size        = min(idims[0], idims[1]) - abs(num);
+    Array<T> out      = createEmptyArray<T>(dim4(size, 1, idims[2], idims[3]));
 
     getQueue().enqueue(kernel::diagExtract<T>, out, in, num);
 
@@ -48,8 +50,8 @@ Array<T> diagExtract(const Array<T> &in, const int num)
 }
 
 #define INSTANTIATE_DIAGONAL(T)                                          \
-    template Array<T>  diagExtract<T>    (const Array<T> &in, const int num); \
-    template Array<T>  diagCreate <T>    (const Array<T> &in, const int num);
+    template Array<T> diagExtract<T>(const Array<T> &in, const int num); \
+    template Array<T> diagCreate<T>(const Array<T> &in, const int num);
 
 INSTANTIATE_DIAGONAL(float)
 INSTANTIATE_DIAGONAL(double)
@@ -63,5 +65,7 @@ INSTANTIATE_DIAGONAL(char)
 INSTANTIATE_DIAGONAL(uchar)
 INSTANTIATE_DIAGONAL(short)
 INSTANTIATE_DIAGONAL(ushort)
+INSTANTIATE_DIAGONAL(half)
 
-}
+}  // namespace cpu
+}  // namespace arrayfire

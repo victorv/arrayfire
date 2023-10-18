@@ -8,22 +8,22 @@
  ********************************************************/
 
 #pragma once
-#include <Array.hpp>
-#include <err_cpu.hpp>
+#include <Param.hpp>
 
-namespace cpu
-{
-namespace kernel
-{
+namespace arrayfire {
+namespace cpu {
+namespace kernel {
 
 template<typename Tk, typename Tv>
-void sort0ByKeyIterative(Array<Tk> okey, Array<Tv> oval, bool isAscending);
+void sort0ByKeyIterative(Param<Tk> okey, Param<Tv> oval, bool isAscending);
 
 template<typename Tk, typename Tv>
-void sortByKeyBatched(Array<Tk> okey, Array<Tv> oval, const int dim, bool isAscending);
+void sortByKeyBatched(Param<Tk> okey, Param<Tv> oval, const int dim,
+                      bool isAscending);
 
 template<typename Tk, typename Tv>
-void sort0ByKey(Array<Tk> okey, Array<Tv> oval, bool isAscending);
+void sort0ByKey(Param<Tk> okey, Param<Tv> oval, bool isAscending);
 
-}
-}
+}  // namespace kernel
+}  // namespace cpu
+}  // namespace arrayfire

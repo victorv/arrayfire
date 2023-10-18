@@ -9,6 +9,10 @@
 
 #pragma once
 
+#ifndef __CUDACC_RTC__
+#include <af/compilers.h>
+#endif
+
 #if defined(_WIN32) || defined(_MSC_VER)
     // http://msdn.microsoft.com/en-us/library/b0084kay(v=VS.80).aspx
     // http://msdn.microsoft.com/en-us/library/3y1sfaz2%28v=VS.80%29.aspx
@@ -18,7 +22,7 @@
         #define AFAPI  __declspec(dllimport)
     #endif
 
-// bool
+    // bool
     #ifndef __cplusplus
         #define bool unsigned char
         #define false 0
@@ -26,17 +30,19 @@
     #endif
     #define __PRETTY_FUNCTION__ __FUNCSIG__
     #define SIZE_T_FRMT_SPECIFIER "%Iu"
-    #define DEPRECATED(msg) __declspec(deprecated( msg ))
+    #define AF_DEPRECATED(msg) __declspec(deprecated( msg ))
+    #if _MSC_VER >= 1800
+        #define AF_HAS_VARIADIC_TEMPLATES
+    #endif
 #else
     #define AFAPI   __attribute__((visibility("default")))
     #include <stdbool.h>
     #define SIZE_T_FRMT_SPECIFIER "%zu"
 #if __GNUC__ >= 4 && __GNUC_MINOR > 4
-    #define DEPRECATED(msg) __attribute__((deprecated( msg )))
+    #define AF_DEPRECATED(msg) __attribute__((deprecated( msg )))
 #else
-    #define DEPRECATED(msg) __attribute__((deprecated))
+    #define AF_DEPRECATED(msg) __attribute__((deprecated))
 #endif
-
 #endif
 
 // Known 64-bit x86 and ARM architectures use long long
@@ -52,8 +58,10 @@
 
 #include <stdlib.h>
 
-typedef long long intl;
-typedef unsigned long long uintl;
+#ifndef AFDLL  // prevents the use of these types internally
+typedef AF_DEPRECATED("intl is deprecated. Use long long instead.") long long intl;
+typedef AF_DEPRECATED("uintl is deprecated. Use unsigned long long instead.") unsigned long long uintl;
+#endif
 
 #include <af/version.h>
 #ifndef AF_API_VERSION
@@ -64,63 +72,63 @@ typedef enum {
     ///
     /// The function returned successfully
     ///
-    AF_SUCCESS            =   0,
+    AF_SUCCESS            =   0
 
     // 100-199 Errors in environment
 
     ///
     /// The system or device ran out of memory
     ///
-    AF_ERR_NO_MEM         = 101,
+    , AF_ERR_NO_MEM         = 101
 
     ///
     /// There was an error in the device driver
     ///
-    AF_ERR_DRIVER         = 102,
+    , AF_ERR_DRIVER         = 102
 
     ///
     /// There was an error with the runtime environment
     ///
-    AF_ERR_RUNTIME        = 103,
+    , AF_ERR_RUNTIME        = 103
 
     // 200-299 Errors in input parameters
 
     ///
     /// The input array is not a valid af_array object
     ///
-    AF_ERR_INVALID_ARRAY  = 201,
+    , AF_ERR_INVALID_ARRAY  = 201
 
     ///
     /// One of the function arguments is incorrect
     ///
-    AF_ERR_ARG            = 202,
+    , AF_ERR_ARG            = 202
 
     ///
     /// The size is incorrect
     ///
-    AF_ERR_SIZE           = 203,
+    , AF_ERR_SIZE           = 203
 
     ///
     /// The type is not suppported by this function
     ///
-    AF_ERR_TYPE           = 204,
+    , AF_ERR_TYPE           = 204
 
     ///
     /// The type of the input arrays are not compatible
     ///
-    AF_ERR_DIFF_TYPE      = 205,
+    , AF_ERR_DIFF_TYPE      = 205
 
     ///
     /// Function does not support GFOR / batch mode
     ///
-    AF_ERR_BATCH          = 207,
+    , AF_ERR_BATCH          = 207
 
 
 #if AF_API_VERSION >= 33
     ///
     /// Input does not belong to the current device.
     ///
-    AF_ERR_DEVICE         = 208,
+    , AF_ERR_DEVICE         = 208
 #endif
 
     // 300-399 Errors for missing software features
@@ -128,18 +136,18 @@ typedef enum {
     ///
     /// The option is not supported
     ///
-    AF_ERR_NOT_SUPPORTED  = 301,
+    , AF_ERR_NOT_SUPPORTED  = 301
 
     ///
     /// This build of ArrayFire does not support this feature
     ///
-    AF_ERR_NOT_CONFIGURED = 302,
+    , AF_ERR_NOT_CONFIGURED = 302
 
 #if AF_API_VERSION >= 32
     ///
     /// This build of ArrayFire is not compiled with "nonfree" algorithms
     ///
-    AF_ERR_NONFREE        = 303,
+    , AF_ERR_NONFREE        = 303
 #endif
 
     // 400-499 Errors for missing hardware features
@@ -147,13 +155,20 @@ typedef enum {
     ///
     /// This device does not support double
     ///
-    AF_ERR_NO_DBL         = 401,
+    , AF_ERR_NO_DBL         = 401
 
     ///
     /// This build of ArrayFire was not built with graphics or this device does
     /// not support graphics
     ///
-    AF_ERR_NO_GFX         = 402,
+    , AF_ERR_NO_GFX         = 402
+
+#if AF_API_VERSION >= 37
+    ///
+    /// This device does not support half
+    ///
+    , AF_ERR_NO_HALF        = 403
+#endif
 
     // 500-599 Errors specific to heterogenous API
 
@@ -161,21 +176,21 @@ typedef enum {
     ///
     /// There was an error when loading the libraries
     ///
-    AF_ERR_LOAD_LIB       = 501,
+    , AF_ERR_LOAD_LIB       = 501
 #endif
 
 #if AF_API_VERSION >= 32
     ///
     /// There was an error when loading the symbols
     ///
-    AF_ERR_LOAD_SYM       = 502,
+    , AF_ERR_LOAD_SYM       = 502
 #endif
 
 #if AF_API_VERSION >= 32
     ///
     /// There was a mismatch between the input array and the active backend
     ///
-    AF_ERR_ARR_BKND_MISMATCH    = 503,
+    , AF_ERR_ARR_BKND_MISMATCH    = 503
 #endif
 
     // 900-999 Errors from upstream libraries and runtimes
@@ -184,36 +199,39 @@ typedef enum {
     /// There was an internal error either in ArrayFire or in a project
     /// upstream
     ///
-    AF_ERR_INTERNAL       = 998,
+    , AF_ERR_INTERNAL       = 998
 
     ///
     /// Unknown Error
     ///
-    AF_ERR_UNKNOWN        = 999
+    , AF_ERR_UNKNOWN        = 999
 } af_err;
 
 typedef enum {
     f32,    ///< 32-bit floating point values
     c32,    ///< 32-bit complex floating point values
-    f64,    ///< 64-bit complex floating point values
+    f64,    ///< 64-bit floating point values
     c64,    ///< 64-bit complex floating point values
     b8 ,    ///< 8-bit boolean values
     s32,    ///< 32-bit signed integral values
     u32,    ///< 32-bit unsigned integral values
     u8 ,    ///< 8-bit unsigned integral values
     s64,    ///< 64-bit signed integral values
-    u64,    ///< 64-bit unsigned integral values
+    u64    ///< 64-bit unsigned integral values
 #if AF_API_VERSION >= 32
-    s16,    ///< 16-bit signed integral values
+    , s16    ///< 16-bit signed integral values
 #endif
 #if AF_API_VERSION >= 32
-    u16,    ///< 16-bit unsigned integral values
+    , u16    ///< 16-bit unsigned integral values
+#endif
+#if AF_API_VERSION >= 37
+    , f16    ///< 16-bit floating point value
 #endif
 } af_dtype;
 
 typedef enum {
     afDevice,   ///< Device pointer
-    afHost,     ///< Host pointer
+    afHost     ///< Host pointer
 } af_source;
 
 #define AF_MAX_DIMS 4
@@ -226,21 +244,21 @@ typedef enum {
     AF_INTERP_LINEAR,          ///< Linear Interpolation
     AF_INTERP_BILINEAR,        ///< Bilinear Interpolation
     AF_INTERP_CUBIC,           ///< Cubic Interpolation
-    AF_INTERP_LOWER,           ///< Floor Indexed
+    AF_INTERP_LOWER           ///< Floor Indexed
 #if AF_API_VERSION >= 34
-    AF_INTERP_LINEAR_COSINE,   ///< Linear Interpolation with cosine smoothing
+    , AF_INTERP_LINEAR_COSINE   ///< Linear Interpolation with cosine smoothing
 #endif
 #if AF_API_VERSION >= 34
-    AF_INTERP_BILINEAR_COSINE, ///< Bilinear Interpolation with cosine smoothing
+    , AF_INTERP_BILINEAR_COSINE ///< Bilinear Interpolation with cosine smoothing
 #endif
 #if AF_API_VERSION >= 34
-    AF_INTERP_BICUBIC,         ///< Bicubic Interpolation
+    , AF_INTERP_BICUBIC         ///< Bicubic Interpolation
 #endif
 #if AF_API_VERSION >= 34
-    AF_INTERP_CUBIC_SPLINE,    ///< Cubic Interpolation with Catmull-Rom splines
+    , AF_INTERP_CUBIC_SPLINE    ///< Cubic Interpolation with Catmull-Rom splines
 #endif
 #if AF_API_VERSION >= 34
-    AF_INTERP_BICUBIC_SPLINE,  ///< Bicubic Interpolation with Catmull-Rom splines
+    , AF_INTERP_BICUBIC_SPLINE  ///< Bicubic Interpolation with Catmull-Rom splines
 #endif
 
 } af_interp_type;
@@ -254,7 +272,17 @@ typedef enum {
     ///
     /// Out of bound values are symmetric over the edge
     ///
-    AF_PAD_SYM
+    AF_PAD_SYM,
+
+    ///
+    /// Out of bound values are clamped to the edge
+    ///
+    AF_PAD_CLAMP_TO_EDGE,
+
+    ///
+    /// Out of bound values are mapped to range of the dimension in cyclic fashion
+    ///
+    AF_PAD_PERIODIC
 } af_border_type;
 
 typedef enum {
@@ -279,13 +307,13 @@ typedef enum {
     ///
     /// Output of the convolution is signal_len + filter_len - 1
     ///
-    AF_CONV_EXPAND,
+    AF_CONV_EXPAND
 } af_conv_mode;
 
 typedef enum {
     AF_CONV_AUTO,    ///< ArrayFire automatically picks the right convolution algorithm
     AF_CONV_SPATIAL, ///< Perform convolution in spatial domain
-    AF_CONV_FREQ,    ///< Perform convolution in frequency domain
+    AF_CONV_FREQ     ///< Perform convolution in frequency domain
 } af_conv_domain;
 
 typedef enum {
@@ -304,16 +332,16 @@ typedef enum {
 typedef enum {
     AF_YCC_601 = 601,  ///< ITU-R BT.601 (formerly CCIR 601) standard
     AF_YCC_709 = 709,  ///< ITU-R BT.709 standard
-    AF_YCC_2020 = 2020  ///< ITU-R BT.2020 standard
+    AF_YCC_2020 = 2020 ///< ITU-R BT.2020 standard
 } af_ycc_std;
 #endif
 
 typedef enum {
     AF_GRAY = 0, ///< Grayscale
     AF_RGB,      ///< 3-channel RGB
-    AF_HSV,      ///< 3-channel HSV
+    AF_HSV       ///< 3-channel HSV
 #if AF_API_VERSION >= 31
-    AF_YCbCr     ///< 3-channel YCbCr
+    , AF_YCbCr     ///< 3-channel YCbCr
 #endif
 } af_cspace_t;
 
@@ -342,7 +370,7 @@ typedef enum {
     AF_NORM_MATRIX_2,      ///< returns the max singular value). Currently NOT SUPPORTED
     AF_NORM_MATRIX_L_PQ,   ///< returns Lpq-norm
 
-    AF_NORM_EUCLID = AF_NORM_VECTOR_2, ///< The default. Same as AF_NORM_VECTOR_2
+    AF_NORM_EUCLID = AF_NORM_VECTOR_2 ///< The default. Same as AF_NORM_VECTOR_2
 } af_norm_type;
 
 #if AF_API_VERSION >= 31
@@ -387,6 +415,7 @@ typedef enum {
     AF_BACKEND_CPU     = 1,  ///< CPU a.k.a sequential algorithms
     AF_BACKEND_CUDA    = 2,  ///< CUDA Compute Backend
     AF_BACKEND_OPENCL  = 4,  ///< OpenCL Compute Backend
+    AF_BACKEND_ONEAPI  = 8   ///< OneAPI Compute Backend
 } af_backend;
 #endif
 
@@ -424,12 +453,16 @@ typedef enum {
 ////////////////////////////////////////////////////////////////////////////////
 typedef enum {
     AF_COLORMAP_DEFAULT = 0,    ///< Default grayscale map
-    AF_COLORMAP_SPECTRUM= 1,    ///< Spectrum map
-    AF_COLORMAP_COLORS  = 2,    ///< Colors
+    AF_COLORMAP_SPECTRUM= 1,    ///< Spectrum map (390nm-830nm, in sRGB colorspace)
+    AF_COLORMAP_COLORS  = 2,    ///< Colors, aka. Rainbow
     AF_COLORMAP_RED     = 3,    ///< Red hue map
     AF_COLORMAP_MOOD    = 4,    ///< Mood map
     AF_COLORMAP_HEAT    = 5,    ///< Heat map
-    AF_COLORMAP_BLUE    = 6     ///< Blue hue map
+    AF_COLORMAP_BLUE    = 6,    ///< Blue hue map
+    AF_COLORMAP_INFERNO = 7,    ///< Perceptually uniform shades of black-red-yellow
+    AF_COLORMAP_MAGMA   = 8,    ///< Perceptually uniform shades of black-red-white
+    AF_COLORMAP_PLASMA  = 9,    ///< Perceptually uniform shades of blue-red-yellow
+    AF_COLORMAP_VIRIDIS = 10    ///< Perceptually uniform shades of blue-green-yellow
 } af_colormap;
 
 #if AF_API_VERSION >= 32
@@ -446,13 +479,72 @@ typedef enum {
 #endif
 ////////////////////////////////////////////////////////////////////////////////
 
+#if AF_API_VERSION >= 35
+typedef enum {
+    AF_CANNY_THRESHOLD_MANUAL    = 0, ///< User has to define canny thresholds manually
+    AF_CANNY_THRESHOLD_AUTO_OTSU = 1  ///< Determine canny algorithm thresholds using Otsu algorithm
+} af_canny_threshold;
+#endif
+
 #if AF_API_VERSION >= 34
 typedef enum {
     AF_STORAGE_DENSE     = 0,   ///< Storage type is dense
     AF_STORAGE_CSR       = 1,   ///< Storage type is CSR
     AF_STORAGE_CSC       = 2,   ///< Storage type is CSC
-    AF_STORAGE_COO       = 3,   ///< Storage type is COO
+    AF_STORAGE_COO       = 3    ///< Storage type is COO
 } af_storage;
+#endif
+
+#if AF_API_VERSION >= 36
+typedef enum {
+    AF_FLUX_QUADRATIC   = 1,    ///< Quadratic flux function
+    AF_FLUX_EXPONENTIAL = 2,    ///< Exponential flux function
+    AF_FLUX_DEFAULT     = 0     ///< Default flux function is exponential
+} af_flux_function;
+
+typedef enum {
+    AF_DIFFUSION_GRAD = 1,      ///< Gradient diffusion equation
+    AF_DIFFUSION_MCDE = 2,      ///< Modified curvature diffusion equation
+    AF_DIFFUSION_DEFAULT = 0    ///< Default option is same as AF_DIFFUSION_GRAD
+} af_diffusion_eq;
+
+typedef enum {
+    AF_TOPK_MIN         = 1,  ///< Top k min values
+    AF_TOPK_MAX         = 2,  ///< Top k max values
+    AF_TOPK_STABLE      = 4,  ///< Preserve order of indices for equal values
+    AF_TOPK_STABLE_MIN  = AF_TOPK_STABLE | AF_TOPK_MIN, ///< Top k min with stable indices
+    AF_TOPK_STABLE_MAX  = AF_TOPK_STABLE | AF_TOPK_MAX, ///< Top k max with stable indices
+    AF_TOPK_DEFAULT = 0   ///< Default option (max)
+} af_topk_function;
+#endif
+
+#if AF_API_VERSION >= 37
+typedef enum {
+    AF_VARIANCE_DEFAULT    = 0, ///< Default (Population) variance
+    AF_VARIANCE_SAMPLE     = 1, ///< Sample variance
+    AF_VARIANCE_POPULATION = 2  ///< Population variance
+} af_var_bias;
+
+typedef enum {
+    AF_ITERATIVE_DECONV_LANDWEBER       = 1,        ///< Landweber Deconvolution
+    AF_ITERATIVE_DECONV_RICHARDSONLUCY  = 2,        ///< Richardson-Lucy Deconvolution
+    AF_ITERATIVE_DECONV_DEFAULT         = 0         ///< Default is Landweber deconvolution
+} af_iterative_deconv_algo;
+
+typedef enum {
+    AF_INVERSE_DECONV_TIKHONOV       = 1,        ///< Tikhonov Inverse deconvolution
+    AF_INVERSE_DECONV_DEFAULT        = 0         ///< Default is Tikhonov deconvolution
+} af_inverse_deconv_algo;
+
+#endif
+
+#if AF_API_VERSION >= 37
+typedef enum {
+    AF_CONV_GRADIENT_DEFAULT = 0,
+    AF_CONV_GRADIENT_FILTER  = 1,
+    AF_CONV_GRADIENT_DATA    = 2,
+    AF_CONV_GRADIENT_BIAS    = 3
+} af_conv_gradient_type;
 #endif
 
 #ifdef __cplusplus
@@ -495,6 +587,20 @@ namespace af
 #endif
 #if AF_API_VERSION >= 34
     typedef af_random_engine_type randomEngineType;
+#endif
+#if AF_API_VERSION >= 35
+    typedef af_canny_threshold cannyThreshold;
+#endif
+#if AF_API_VERSION >= 36
+    typedef af_flux_function fluxFunction;
+    typedef af_diffusion_eq diffusionEq;
+    typedef af_topk_function topkFunction;
+#endif
+#if AF_API_VERSION >= 37
+    typedef af_var_bias varBias;
+    typedef af_iterative_deconv_algo iterativeDeconvAlgo;
+    typedef af_inverse_deconv_algo inverseDeconvAlgo;
+    typedef af_conv_gradient_type convGradientType;
 #endif
 }
 

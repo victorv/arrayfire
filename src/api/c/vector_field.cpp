@@ -7,145 +7,232 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/graphics.h>
 #include <af/data.h>
+#include <af/graphics.h>
 
-#include <ArrayInfo.hpp>
-#include <graphics_common.hpp>
-#include <err_common.hpp>
 #include <backend.hpp>
-#include <vector_field.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/err_common.hpp>
+#include <common/graphics_common.hpp>
+#include <handle.hpp>
+#include <join.hpp>
+#include <platform.hpp>
 #include <reduce.hpp>
 #include <transpose.hpp>
-#include <handle.hpp>
+#include <vector_field.hpp>
+
+#include <vector>
 
 using af::dim4;
-using namespace detail;
-
-#if defined(WITH_GRAPHICS)
-using namespace graphics;
+using arrayfire::common::ForgeManager;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+using arrayfire::common::getGLType;
+using arrayfire::common::makeContextCurrent;
+using arrayfire::common::step_round;
+using detail::Array;
+using detail::copy_vector_field;
+using detail::createEmptyArray;
+using detail::forgeManager;
+using detail::reduce;
+using detail::transpose;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
+using std::vector;
 
 template<typename T>
-forge::Chart* setup_vector_field(const forge::Window* const window,
-                                 const af_array points, const af_array directions,
-                                 const af_cell* const props, const bool transpose_ = true)
-{
-    Array<T> pIn = getArray<T>(points);
-    Array<T> dIn = getArray<T>(directions);
+fg_chart setup_vector_field(fg_window window, const vector<af_array>& points,
+                            const vector<af_array>& directions,
+                            const af_cell* const props,
+                            const bool transpose_ = true) {
+    ForgeModule& _ = forgePlugin();
+    vector<Array<T>> pnts;
+    vector<Array<T>> dirs;
+
+    for (unsigned i = 0; i < points.size(); ++i) {
+        pnts.push_back(getArray<T>(points[i]));
+        dirs.push_back(getArray<T>(directions[i]));
+    }
+
+    // Join for set up vector
+    dim4 odims(3, points.size());
+    Array<T> out_pnts = createEmptyArray<T>(odims);
+    Array<T> out_dirs = createEmptyArray<T>(odims);
+    detail::join(out_pnts, 1, pnts);
+    detail::join(out_dirs, 1, dirs);
+    Array<T> pIn = out_pnts;
+    Array<T> dIn = out_dirs;
 
     // do transpose if required
-    if(transpose_) {
+    if (transpose_) {
         pIn = transpose<T>(pIn, false);
         dIn = transpose<T>(dIn, false);
     }
 
-    ForgeManager& fgMngr = ForgeManager::getInstance();
+    ForgeManager& fgMngr = forgeManager();
 
     // Get the chart for the current grid position (if any)
-    forge::Chart* chart = NULL;
+    fg_chart chart = NULL;
 
-    if(pIn.dims()[0] == 2) {
-        if (props->col>-1 && props->row>-1)
-            chart = fgMngr.getChart(window, props->row, props->col, FG_CHART_2D);
-        else
+    if (pIn.dims()[0] == 2) {
+        if (props->col > -1 && props->row > -1) {
+            chart =
+                fgMngr.getChart(window, props->row, props->col, FG_CHART_2D);
+        } else {
             chart = fgMngr.getChart(window, 0, 0, FG_CHART_2D);
+        }
     } else {
-        if (props->col>-1 && props->row>-1)
-            chart = fgMngr.getChart(window, props->row, props->col, FG_CHART_3D);
-        else
+        if (props->col > -1 && props->row > -1) {
+            chart =
+                fgMngr.getChart(window, props->row, props->col, FG_CHART_3D);
+        } else {
             chart = fgMngr.getChart(window, 0, 0, FG_CHART_3D);
+        }
     }
 
-    forge::VectorField* vectorfield = fgMngr.getVectorField(chart, pIn.dims()[1], getGLType<T>());
+    fg_vector_field vfield =
+        fgMngr.getVectorField(chart, pIn.dims()[1], getGLType<T>());
 
     // ArrayFire LOGO dark blue shade
-    vectorfield->setColor(0.130f, 0.173f, 0.263f, 1.0);
+    FG_CHECK(_.fg_set_vector_field_color(vfield, 0.130f, 0.173f, 0.263f, 1.0));
 
-    copy_vector_field<T>(pIn, dIn, vectorfield);
+    // If chart axes limits do not have a manual override
+    // then compute and set axes limits
+    if (!fgMngr.getChartAxesOverride(chart)) {
+        float cmin[3], cmax[3];
+        T dmin[3], dmax[3];
+        FG_CHECK(_.fg_get_chart_axes_limits(
+            &cmin[0], &cmax[0], &cmin[1], &cmax[1], &cmin[2], &cmax[2], chart));
+        copyData(dmin, reduce<af_min_t, T, T>(pIn, 1));
+        copyData(dmax, reduce<af_max_t, T, T>(pIn, 1));
+
+        if (cmin[0] == 0 && cmax[0] == 0 && cmin[1] == 0 && cmax[1] == 0 &&
+            cmin[2] == 0 && cmax[2] == 0) {
+            // No previous limits. Set without checking
+            cmin[0] = step_round(dmin[0], false);
+            cmax[0] = step_round(dmax[0], true);
+            cmin[1] = step_round(dmin[1], false);
+            cmax[1] = step_round(dmax[1], true);
+            if (pIn.dims()[0] == 3) { cmin[2] = step_round(dmin[2], false); }
+            if (pIn.dims()[0] == 3) { cmax[2] = step_round(dmax[2], true); }
+        } else {
+            if (cmin[0] > dmin[0]) { cmin[0] = step_round(dmin[0], false); }
+            if (cmax[0] < dmax[0]) { cmax[0] = step_round(dmax[0], true); }
+            if (cmin[1] > dmin[1]) { cmin[1] = step_round(dmin[1], false); }
+            if (cmax[1] < dmax[1]) { cmax[1] = step_round(dmax[1], true); }
+            if (pIn.dims()[0] == 3) {
+                if (cmin[2] > dmin[2]) { cmin[2] = step_round(dmin[2], false); }
+                if (cmax[2] < dmax[2]) { cmax[2] = step_round(dmax[2], true); }
+            }
+        }
+        FG_CHECK(_.fg_set_chart_axes_limits(chart, cmin[0], cmax[0], cmin[1],
+                                            cmax[1], cmin[2], cmax[2]));
+    }
+    copy_vector_field<T>(pIn, dIn, vfield);
 
     return chart;
 }
 
-af_err vectorFieldWrapper(const af_window wind, const af_array points, const af_array directions,
-                          const af_cell* const props)
-{
-    if(wind==0) {
-        AF_RETURN_ERROR("Not a valid window", AF_SUCCESS);
-    }
-
+af_err vectorFieldWrapper(const af_window window, const af_array points,
+                          const af_array directions,
+                          const af_cell* const props) {
     try {
-        ArrayInfo pInfo = getInfo(points);
-        af::dim4 pDims  = pInfo.dims();
-        af_dtype pType  = pInfo.getType();
+        if (window == 0) { AF_ERROR("Not a valid window", AF_ERR_INTERNAL); }
 
-        ArrayInfo dInfo = getInfo(directions);
-        af::dim4 dDims  = dInfo.dims();
-        af_dtype dType  = dInfo.getType();
+        const ArrayInfo& pInfo = getInfo(points);
+        af::dim4 pDims         = pInfo.dims();
+        af_dtype pType         = pInfo.getType();
+
+        const ArrayInfo& dInfo = getInfo(directions);
+        const af::dim4& dDims  = dInfo.dims();
+        af_dtype dType         = dInfo.getType();
 
         DIM_ASSERT(0, pDims == dDims);
         DIM_ASSERT(0, pDims.ndims() == 2);
-        DIM_ASSERT(0, pDims[1] == 2 || pDims[1] == 3); // Columns:P 2 means 2D and 3 means 3D
+        DIM_ASSERT(0,
+                   pDims[1] == 2 ||
+                       pDims[1] == 3);  // Columns:P 2 means 2D and 3 means 3D
 
         TYPE_ASSERT(pType == dType);
 
-        forge::Window* window = reinterpret_cast<forge::Window*>(wind);
         makeContextCurrent(window);
 
-        forge::Chart* chart = NULL;
+        fg_chart chart = NULL;
 
-        switch(pType) {
-            case f32: chart = setup_vector_field<float  >(window, points, directions, props); break;
-            case s32: chart = setup_vector_field<int    >(window, points, directions, props); break;
-            case u32: chart = setup_vector_field<uint   >(window, points, directions, props); break;
-            case s16: chart = setup_vector_field<short  >(window, points, directions, props); break;
-            case u16: chart = setup_vector_field<ushort >(window, points, directions, props); break;
-            case u8 : chart = setup_vector_field<uchar  >(window, points, directions, props); break;
-            default:  TYPE_ERROR(1, pType);
+        vector<af_array> pnts;
+        pnts.push_back(points);
+
+        vector<af_array> dirs;
+        dirs.push_back(directions);
+
+        switch (pType) {
+            case f32:
+                chart = setup_vector_field<float>(window, pnts, dirs, props);
+                break;
+            case s32:
+                chart = setup_vector_field<int>(window, pnts, dirs, props);
+                break;
+            case u32:
+                chart = setup_vector_field<uint>(window, pnts, dirs, props);
+                break;
+            case s16:
+                chart = setup_vector_field<short>(window, pnts, dirs, props);
+                break;
+            case u16:
+                chart = setup_vector_field<ushort>(window, pnts, dirs, props);
+                break;
+            case u8:
+                chart = setup_vector_field<uchar>(window, pnts, dirs, props);
+                break;
+            default: TYPE_ERROR(1, pType);
         }
+        auto gridDims = forgeManager().getWindowGrid(window);
 
-        // Window's draw function requires either image or chart
-        if (props->col > -1 && props->row > -1)
-            window->draw(props->row, props->col, *chart, props->title);
-        else
-            window->draw(*chart);
+        ForgeModule& _ = forgePlugin();
+        if (props->col > -1 && props->row > -1) {
+            FG_CHECK(_.fg_draw_chart_to_cell(
+                window, gridDims.first, gridDims.second,
+                props->row * gridDims.second + props->col, chart,
+                props->title));
+        } else {
+            FG_CHECK(_.fg_draw_chart(window, chart));
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err vectorFieldWrapper(const af_window wind,
-                          const af_array xPoints, const af_array yPoints, const af_array zPoints,
-                          const af_array xDirs, const af_array yDirs, const af_array zDirs,
-                          const af_cell* const props)
-{
-    if(wind==0) {
-        AF_RETURN_ERROR("Not a valid window", AF_SUCCESS);
-    }
-
+af_err vectorFieldWrapper(const af_window window, const af_array xPoints,
+                          const af_array yPoints, const af_array zPoints,
+                          const af_array xDirs, const af_array yDirs,
+                          const af_array zDirs, const af_cell* const props) {
     try {
-        ArrayInfo xpInfo = getInfo(xPoints);
-        ArrayInfo ypInfo = getInfo(yPoints);
-        ArrayInfo zpInfo = getInfo(zPoints);
+        if (window == 0) { AF_ERROR("Not a valid window", AF_SUCCESS); }
 
-        af::dim4 xpDims  = xpInfo.dims();
-        af::dim4 ypDims  = ypInfo.dims();
-        af::dim4 zpDims  = zpInfo.dims();
+        const ArrayInfo& xpInfo = getInfo(xPoints);
+        const ArrayInfo& ypInfo = getInfo(yPoints);
+        const ArrayInfo& zpInfo = getInfo(zPoints);
 
-        af_dtype xpType  = xpInfo.getType();
-        af_dtype ypType  = ypInfo.getType();
-        af_dtype zpType  = zpInfo.getType();
+        af::dim4 xpDims        = xpInfo.dims();
+        const af::dim4& ypDims = ypInfo.dims();
+        const af::dim4& zpDims = zpInfo.dims();
 
-        ArrayInfo xdInfo = getInfo(xDirs);
-        ArrayInfo ydInfo = getInfo(yDirs);
-        ArrayInfo zdInfo = getInfo(zDirs);
+        af_dtype xpType = xpInfo.getType();
+        af_dtype ypType = ypInfo.getType();
+        af_dtype zpType = zpInfo.getType();
 
-        af::dim4 xdDims  = xdInfo.dims();
-        af::dim4 ydDims  = ydInfo.dims();
-        af::dim4 zdDims  = zdInfo.dims();
+        const ArrayInfo& xdInfo = getInfo(xDirs);
+        const ArrayInfo& ydInfo = getInfo(yDirs);
+        const ArrayInfo& zdInfo = getInfo(zDirs);
 
-        af_dtype xdType  = xdInfo.getType();
-        af_dtype ydType  = ydInfo.getType();
-        af_dtype zdType  = zdInfo.getType();
+        const af::dim4& xdDims = xdInfo.dims();
+        const af::dim4& ydDims = ydInfo.dims();
+        const af::dim4& zdDims = zdInfo.dims();
+
+        af_dtype xdType = xdInfo.getType();
+        af_dtype ydType = ydInfo.getType();
+        af_dtype zdType = zdInfo.getType();
 
         // Assert all arrays are equal dimensions
         DIM_ASSERT(1, xpDims == xdDims);
@@ -166,68 +253,86 @@ af_err vectorFieldWrapper(const af_window wind,
         DIM_ASSERT(1, xpType == ypType);
         DIM_ASSERT(1, xpType == zpType);
 
-        forge::Window* window = reinterpret_cast<forge::Window*>(wind);
         makeContextCurrent(window);
 
-        forge::Chart* chart = NULL;
+        fg_chart chart = NULL;
 
-        // Join for set up vector
-        af_array points = 0, directions = 0;
-        af_array pIn[] = {xPoints, yPoints, zPoints};
-        af_array dIn[] = {xDirs, yDirs, zDirs};
-        AF_CHECK(af_join_many(&points, 1, 3, pIn));
-        AF_CHECK(af_join_many(&directions, 1, 3, dIn));
+        vector<af_array> points;
+        points.push_back(xPoints);
+        points.push_back(yPoints);
+        points.push_back(zPoints);
 
-        switch(xpType) {
-            case f32: chart = setup_vector_field<float  >(window, points, directions, props); break;
-            case s32: chart = setup_vector_field<int    >(window, points, directions, props); break;
-            case u32: chart = setup_vector_field<uint   >(window, points, directions, props); break;
-            case s16: chart = setup_vector_field<short  >(window, points, directions, props); break;
-            case u16: chart = setup_vector_field<ushort >(window, points, directions, props); break;
-            case u8 : chart = setup_vector_field<uchar  >(window, points, directions, props); break;
-            default:  TYPE_ERROR(1, xpType);
+        vector<af_array> directions;
+        directions.push_back(xDirs);
+        directions.push_back(yDirs);
+        directions.push_back(zDirs);
+
+        switch (xpType) {
+            case f32:
+                chart = setup_vector_field<float>(window, points, directions,
+                                                  props);
+                break;
+            case s32:
+                chart =
+                    setup_vector_field<int>(window, points, directions, props);
+                break;
+            case u32:
+                chart =
+                    setup_vector_field<uint>(window, points, directions, props);
+                break;
+            case s16:
+                chart = setup_vector_field<short>(window, points, directions,
+                                                  props);
+                break;
+            case u16:
+                chart = setup_vector_field<ushort>(window, points, directions,
+                                                   props);
+                break;
+            case u8:
+                chart = setup_vector_field<uchar>(window, points, directions,
+                                                  props);
+                break;
+            default: TYPE_ERROR(1, xpType);
         }
+        auto gridDims = forgeManager().getWindowGrid(window);
 
-        // Window's draw function requires either image or chart
-        if (props->col > -1 && props->row > -1)
-            window->draw(props->row, props->col, *chart, props->title);
-        else
-            window->draw(*chart);
-
-        AF_CHECK(af_release_array(points));
-        AF_CHECK(af_release_array(directions));
+        ForgeModule& _ = forgePlugin();
+        if (props->col > -1 && props->row > -1) {
+            FG_CHECK(_.fg_draw_chart_to_cell(
+                window, gridDims.first, gridDims.second,
+                props->row * gridDims.second + props->col, chart,
+                props->title));
+        } else {
+            FG_CHECK(_.fg_draw_chart(window, chart));
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err vectorFieldWrapper(const af_window wind,
-                          const af_array xPoints, const af_array yPoints,
-                          const af_array xDirs, const af_array yDirs,
-                          const af_cell* const props)
-{
-    if(wind==0) {
-        AF_RETURN_ERROR("Not a valid window", AF_SUCCESS);
-    }
-
+af_err vectorFieldWrapper(const af_window window, const af_array xPoints,
+                          const af_array yPoints, const af_array xDirs,
+                          const af_array yDirs, const af_cell* const props) {
     try {
-        ArrayInfo xpInfo = getInfo(xPoints);
-        ArrayInfo ypInfo = getInfo(yPoints);
+        if (window == 0) { AF_ERROR("Not a valid window", AF_SUCCESS); }
 
-        af::dim4 xpDims  = xpInfo.dims();
-        af::dim4 ypDims  = ypInfo.dims();
+        const ArrayInfo& xpInfo = getInfo(xPoints);
+        const ArrayInfo& ypInfo = getInfo(yPoints);
 
-        af_dtype xpType  = xpInfo.getType();
-        af_dtype ypType  = ypInfo.getType();
+        af::dim4 xpDims        = xpInfo.dims();
+        const af::dim4& ypDims = ypInfo.dims();
 
-        ArrayInfo xdInfo = getInfo(xDirs);
-        ArrayInfo ydInfo = getInfo(yDirs);
+        af_dtype xpType = xpInfo.getType();
+        af_dtype ypType = ypInfo.getType();
 
-        af::dim4 xdDims  = xdInfo.dims();
-        af::dim4 ydDims  = ydInfo.dims();
+        const ArrayInfo& xdInfo = getInfo(xDirs);
+        const ArrayInfo& ydInfo = getInfo(yDirs);
 
-        af_dtype xdType  = xdInfo.getType();
-        af_dtype ydType  = ydInfo.getType();
+        const af::dim4& xdDims = xdInfo.dims();
+        const af::dim4& ydDims = ydInfo.dims();
+
+        af_dtype xdType = xdInfo.getType();
+        af_dtype ydType = ydInfo.getType();
 
         // Assert all arrays are equal dimensions
         DIM_ASSERT(1, xpDims == xdDims);
@@ -244,75 +349,80 @@ af_err vectorFieldWrapper(const af_window wind,
 
         DIM_ASSERT(1, xpType == ypType);
 
-        forge::Window* window = reinterpret_cast<forge::Window*>(wind);
         makeContextCurrent(window);
 
-        forge::Chart* chart = NULL;
+        fg_chart chart = NULL;
 
-        // Join for set up vector
-        af_array points = 0, directions = 0;
-        AF_CHECK(af_join(&points, 1, xPoints, yPoints));
-        AF_CHECK(af_join(&directions, 1, xDirs, yDirs));
+        vector<af_array> points;
+        points.push_back(xPoints);
+        points.push_back(yPoints);
 
-        switch(xpType) {
-            case f32: chart = setup_vector_field<float  >(window, points, directions, props); break;
-            case s32: chart = setup_vector_field<int    >(window, points, directions, props); break;
-            case u32: chart = setup_vector_field<uint   >(window, points, directions, props); break;
-            case s16: chart = setup_vector_field<short  >(window, points, directions, props); break;
-            case u16: chart = setup_vector_field<ushort >(window, points, directions, props); break;
-            case u8 : chart = setup_vector_field<uchar  >(window, points, directions, props); break;
-            default:  TYPE_ERROR(1, xpType);
+        vector<af_array> directions;
+        directions.push_back(xDirs);
+        directions.push_back(yDirs);
+
+        switch (xpType) {
+            case f32:
+                chart = setup_vector_field<float>(window, points, directions,
+                                                  props);
+                break;
+            case s32:
+                chart =
+                    setup_vector_field<int>(window, points, directions, props);
+                break;
+            case u32:
+                chart =
+                    setup_vector_field<uint>(window, points, directions, props);
+                break;
+            case s16:
+                chart = setup_vector_field<short>(window, points, directions,
+                                                  props);
+                break;
+            case u16:
+                chart = setup_vector_field<ushort>(window, points, directions,
+                                                   props);
+                break;
+            case u8:
+                chart = setup_vector_field<uchar>(window, points, directions,
+                                                  props);
+                break;
+            default: TYPE_ERROR(1, xpType);
         }
 
-        // Window's draw function requires either image or chart
-        if (props->col > -1 && props->row > -1)
-            window->draw(props->row, props->col, *chart, props->title);
-        else
-            window->draw(*chart);
+        auto gridDims = forgeManager().getWindowGrid(window);
 
-        AF_CHECK(af_release_array(points));
-        AF_CHECK(af_release_array(directions));
+        ForgeModule& _ = forgePlugin();
+        if (props->col > -1 && props->row > -1) {
+            FG_CHECK(_.fg_draw_chart_to_cell(
+                window, gridDims.first, gridDims.second,
+                props->row * gridDims.second + props->col, chart,
+                props->title));
+        } else {
+            FG_CHECK(_.fg_draw_chart(window, chart));
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
-#endif // WITH_GRAPHICS
-
-// ADD THIS TO UNIFIED
-af_err af_draw_vector_field_nd(const af_window wind,
-                const af_array points, const af_array directions,
-                const af_cell* const props)
-{
-#if defined(WITH_GRAPHICS)
+af_err af_draw_vector_field_nd(const af_window wind, const af_array points,
+                               const af_array directions,
+                               const af_cell* const props) {
     return vectorFieldWrapper(wind, points, directions, props);
-#else
-    AF_RETURN_ERROR("ArrayFire compiled without graphics support", AF_ERR_NO_GFX);
-#endif
 }
 
-af_err af_draw_vector_field_3d(
-                const af_window wind,
-                const af_array xPoints, const af_array yPoints, const af_array zPoints,
-                const af_array xDirs, const af_array yDirs, const af_array zDirs,
-                const af_cell* const props)
-{
-#if defined(WITH_GRAPHICS)
-    return vectorFieldWrapper(wind, xPoints, yPoints, zPoints, xDirs, yDirs, zDirs, props);
-#else
-    AF_RETURN_ERROR("ArrayFire compiled without graphics support", AF_ERR_NO_GFX);
-#endif
+af_err af_draw_vector_field_3d(const af_window wind, const af_array xPoints,
+                               const af_array yPoints, const af_array zPoints,
+                               const af_array xDirs, const af_array yDirs,
+                               const af_array zDirs,
+                               const af_cell* const props) {
+    return vectorFieldWrapper(wind, xPoints, yPoints, zPoints, xDirs, yDirs,
+                              zDirs, props);
 }
 
-af_err af_draw_vector_field_2d(
-                const af_window wind,
-                const af_array xPoints, const af_array yPoints,
-                const af_array xDirs, const af_array yDirs,
-                const af_cell* const props)
-{
-#if defined(WITH_GRAPHICS)
+af_err af_draw_vector_field_2d(const af_window wind, const af_array xPoints,
+                               const af_array yPoints, const af_array xDirs,
+                               const af_array yDirs,
+                               const af_cell* const props) {
     return vectorFieldWrapper(wind, xPoints, yPoints, xDirs, yDirs, props);
-#else
-    AF_RETURN_ERROR("ArrayFire compiled without graphics support", AF_ERR_NO_GFX);
-#endif
 }

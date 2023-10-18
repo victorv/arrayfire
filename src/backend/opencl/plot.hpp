@@ -7,16 +7,14 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
 #include <Array.hpp>
-#include <graphics_common.hpp>
+#include <common/graphics_common.hpp>
 
-namespace opencl
-{
-    template<typename T>
-    void copy_plot(const Array<T> &P, forge::Plot* plot);
-}
+namespace arrayfire {
+namespace opencl {
 
-#endif
+template<typename T>
+void copy_plot(const Array<T> &P, fg_plot plot);
 
+}  // namespace opencl
+}  // namespace arrayfire

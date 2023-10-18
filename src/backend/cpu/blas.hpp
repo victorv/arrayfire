@@ -8,40 +8,31 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <types.hpp>
+#include <af/defines.h>
 
-#ifdef USE_MKL
-    #include <mkl_cblas.h>
-#else
-    #ifdef __APPLE__
-        #include <Accelerate/Accelerate.h>
-    #else
-        extern "C" {
-            #include <cblas.h>
-        }
-    #endif
-#endif
-
-// TODO: Ask upstream for a more official way to detect it
-#ifdef OPENBLAS_CONST
-#define IS_OPENBLAS
-#endif
-
-// Make sure we get the correct type signature for OpenBLAS
-// OpenBLAS defines blasint as it's index type. Emulate this
-// if we're not dealing with openblas and use it where applicable
-#ifndef IS_OPENBLAS
-typedef int blasint;
-#endif
-
-namespace cpu
-{
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-Array<T> matmul(const Array<T> &lhs, const Array<T> &rhs,
-                af_mat_prop optLhs, af_mat_prop optRhs);
-template<typename T>
-Array<T> dot(const Array<T> &lhs, const Array<T> &rhs,
-             af_mat_prop optLhs, af_mat_prop optRhs);
+void gemm(Array<T> &out, af_mat_prop optLhs, af_mat_prop optRhs, const T *alpha,
+          const Array<T> &lhs, const Array<T> &rhs, const T *beta);
 
+template<typename T>
+Array<T> matmul(const Array<T> &lhs, const Array<T> &rhs, af_mat_prop optLhs,
+                af_mat_prop optRhs) {
+    int Mdim     = optLhs == AF_MAT_NONE ? 0 : 1;
+    int Ndim     = optRhs == AF_MAT_NONE ? 1 : 0;
+    Array<T> res = createEmptyArray<T>(
+        dim4(lhs.dims()[Mdim], rhs.dims()[Ndim], lhs.dims()[2], lhs.dims()[3]));
+    static const T alpha = T(1.0);
+    static const T beta  = T(0.0);
+    gemm(res, optLhs, optRhs, &alpha, lhs, rhs, &beta);
+    return res;
 }
+
+template<typename T>
+Array<T> dot(const Array<T> &lhs, const Array<T> &rhs, af_mat_prop optLhs,
+             af_mat_prop optRhs);
+
+}  // namespace cpu
+}  // namespace arrayfire

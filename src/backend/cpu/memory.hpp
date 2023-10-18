@@ -8,37 +8,60 @@
  ********************************************************/
 #pragma once
 
+#include <common/AllocatorInterface.hpp>
 #include <af/defines.h>
 
-namespace cpu
-{
-    template<typename T> T* memAlloc(const size_t &elements);
-    void *memAllocUser(const size_t &bytes);
+#include <functional>
+#include <memory>
 
-    // Need these as 2 separate function and not a default argument
-    // This is because it is used as the deleter in shared pointer
-    // which cannot support default arguments
-    template<typename T> void memFree(T* ptr);
-    void memFreeUser(void* ptr);
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+using uptr = std::unique_ptr<T[], std::function<void(T[])>>;
 
-    void memLock(const void *ptr);
-    void memUnlock(const void *ptr);
-    bool isLocked(const void *ptr);
+template<typename T>
+std::unique_ptr<T[], std::function<void(void *)>> memAlloc(
+    const size_t &elements);
+void *memAllocUser(const size_t &bytes);
 
-    template<typename T> T* pinnedAlloc(const size_t &elements);
-    template<typename T> void pinnedFree(T* ptr);
+// Need these as 2 separate function and not a default argument
+// This is because it is used as the deleter in shared pointer
+// which cannot support default arguments
+void memFree(void *ptr);
+void memFreeUser(void *ptr);
 
-    size_t getMaxBytes();
-    unsigned getMaxBuffers();
+void memLock(const void *ptr);
+void memUnlock(const void *ptr);
+bool isLocked(const void *ptr);
 
-    void deviceMemoryInfo(size_t *alloc_bytes, size_t *alloc_buffers,
-                          size_t *lock_bytes,  size_t *lock_buffers);
-    void garbageCollect();
-    void pinnedGarbageCollect();
+template<typename T>
+T *pinnedAlloc(const size_t &elements);
+void pinnedFree(void *ptr);
 
-    void printMemInfo(const char *msg, const int device);
+void deviceMemoryInfo(size_t *alloc_bytes, size_t *alloc_buffers,
+                      size_t *lock_bytes, size_t *lock_buffers);
+void signalMemoryCleanup();
+void shutdownMemoryManager();
+void pinnedGarbageCollect();
 
-    void setMemStepSize(size_t step_bytes);
-    size_t getMemStepSize(void);
-    bool checkMemoryLimit();
-}
+void printMemInfo(const char *msg, const int device);
+
+float getMemoryPressure();
+float getMemoryPressureThreshold();
+bool jitTreeExceedsMemoryPressure(size_t bytes);
+void setMemStepSize(size_t step_bytes);
+size_t getMemStepSize(void);
+
+class Allocator final : public common::AllocatorInterface {
+   public:
+    Allocator();
+    ~Allocator() = default;
+    void shutdown() override;
+    int getActiveDeviceId() override;
+    size_t getMaxMemorySize(int id) override;
+    void *nativeAlloc(const size_t bytes) override;
+    void nativeFree(void *ptr) override;
+};
+
+}  // namespace cpu
+}  // namespace arrayfire

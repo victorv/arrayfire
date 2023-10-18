@@ -7,12 +7,15 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <Array.hpp>
+#include <af/index.h>
 
-namespace cpu
-{
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+class Array;
 
 template<typename T>
 void assign(Array<T>& out, const af_index_t idxrs[], const Array<T>& rhs);
 
-}
+}  // namespace cpu
+}  // namespace arrayfire

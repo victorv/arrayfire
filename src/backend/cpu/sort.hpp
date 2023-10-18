@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    Array<T> sort(const Array<T> &in, const unsigned dim, bool isAscending);
-}
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<T> sort(const Array<T> &in, const unsigned dim, bool isAscending);
+}  // namespace cpu
+}  // namespace arrayfire

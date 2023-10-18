@@ -6,42 +6,46 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+#include <kernel/tile.hpp>
+#include <tile.hpp>
 
 #include <Array.hpp>
-#include <tile.hpp>
-#include <kernel/tile.hpp>
+#include <common/half.hpp>
 #include <stdexcept>
 
-namespace opencl
-{
-    template<typename T>
-    Array<T> tile(const Array<T> &in, const af::dim4 &tileDims)
-    {
-        const af::dim4 iDims = in.dims();
-        af::dim4 oDims = iDims;
-        oDims *= tileDims;
+using arrayfire::common::half;
 
-        Array<T> out = createEmptyArray<T>(oDims);
+namespace arrayfire {
+namespace opencl {
+template<typename T>
+Array<T> tile(const Array<T> &in, const af::dim4 &tileDims) {
+    const af::dim4 &iDims = in.dims();
+    af::dim4 oDims        = iDims;
+    oDims *= tileDims;
 
-        kernel::tile<T>(out, in);
+    Array<T> out = createEmptyArray<T>(oDims);
 
-        return out;
-    }
+    kernel::tile<T>(out, in);
 
-#define INSTANTIATE(T)                                                         \
-    template Array<T> tile<T>(const Array<T> &in, const af::dim4 &tileDims);  \
-
-    INSTANTIATE(float)
-    INSTANTIATE(double)
-    INSTANTIATE(cfloat)
-    INSTANTIATE(cdouble)
-    INSTANTIATE(int)
-    INSTANTIATE(uint)
-    INSTANTIATE(intl)
-    INSTANTIATE(uintl)
-    INSTANTIATE(uchar)
-    INSTANTIATE(char)
-    INSTANTIATE(short)
-    INSTANTIATE(ushort)
-
+    return out;
 }
+
+#define INSTANTIATE(T) \
+    template Array<T> tile<T>(const Array<T> &in, const af::dim4 &tileDims);
+
+INSTANTIATE(float)
+INSTANTIATE(double)
+INSTANTIATE(cfloat)
+INSTANTIATE(cdouble)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+INSTANTIATE(uchar)
+INSTANTIATE(char)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+INSTANTIATE(half)
+
+}  // namespace opencl
+}  // namespace arrayfire

@@ -7,33 +7,36 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined(WITH_GRAPHICS)
-
-#include <interopManager.hpp>
 #include <Array.hpp>
-#include <image.hpp>
-#include <err_opencl.hpp>
+#include <GraphicsResourceManager.hpp>
 #include <debug_opencl.hpp>
+#include <err_opencl.hpp>
+#include <image.hpp>
+
 #include <stdexcept>
 #include <vector>
 
-namespace opencl
-{
-using namespace gl;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
-void copy_image(const Array<T> &in, const forge::Image* image)
-{
+void copy_image(const Array<T> &in, fg_image image) {
+    ForgeModule &_ = forgePlugin();
     if (isGLSharingSupported()) {
         CheckGL("Begin opencl resource copy");
-        InteropManager& intrpMngr = InteropManager::getInstance();
 
-        cl::Buffer **resources = intrpMngr.getBufferResource(image);
+        auto res = interopManager().getImageResources(image);
+
         const cl::Buffer *d_X = in.get();
-        size_t num_bytes = image->size();
+
+        unsigned bytes = 0;
+        FG_CHECK(_.fg_get_image_size(&bytes, image));
 
         std::vector<cl::Memory> shared_objects;
-        shared_objects.push_back(*resources[0]);
+        shared_objects.push_back(*(res[0].get()));
 
         glFinish();
 
@@ -43,7 +46,8 @@ void copy_image(const Array<T> &in, const forge::Image* image)
 
         getQueue().enqueueAcquireGLObjects(&shared_objects, NULL, &event);
         event.wait();
-        getQueue().enqueueCopyBuffer(*d_X, *resources[0], 0, 0, num_bytes, NULL, &event);
+        getQueue().enqueueCopyBuffer(*d_X, *(res[0].get()), 0, 0, bytes, NULL,
+                                     &event);
         getQueue().enqueueReleaseGLObjects(&shared_objects, NULL, &event);
         event.wait();
 
@@ -51,11 +55,16 @@ void copy_image(const Array<T> &in, const forge::Image* image)
         CheckGL("End opencl resource copy");
     } else {
         CheckGL("Begin OpenCL fallback-resource copy");
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, image->pixels());
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, image->size(), 0, GL_STREAM_DRAW);
-        GLubyte* ptr = (GLubyte*)glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        unsigned bytes = 0, buffer = 0;
+        FG_CHECK(_.fg_get_image_size(&bytes, image));
+        FG_CHECK(_.fg_get_pixel_buffer(&buffer, image));
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, bytes, 0, GL_STREAM_DRAW);
+        auto *ptr = static_cast<GLubyte *>(
+            glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
         if (ptr) {
-            getQueue().enqueueReadBuffer(*in.get(), CL_TRUE, 0, image->size(), ptr);
+            getQueue().enqueueReadBuffer(*in.get(), CL_TRUE, 0, bytes, ptr);
             glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
         }
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -63,8 +72,7 @@ void copy_image(const Array<T> &in, const forge::Image* image)
     }
 }
 
-#define INSTANTIATE(T)      \
-    template void copy_image<T>(const Array<T> &in, const forge::Image* image);
+#define INSTANTIATE(T) template void copy_image<T>(const Array<T> &, fg_image);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -75,6 +83,5 @@ INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
 
-}
-
-#endif
+}  // namespace opencl
+}  // namespace arrayfire

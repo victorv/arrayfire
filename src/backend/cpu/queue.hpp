@@ -6,88 +6,107 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+#pragma once
 
-#include <util.hpp>
+#include <Param.hpp>
+#include <common/util.hpp>
 #include <memory.hpp>
 
-//FIXME: Is there a better way to check for std::future not being supported ?
-#if defined(AF_DISABLE_CPU_ASYNC) || (defined(__GNUC__) && (__GCC_ATOMIC_INT_LOCK_FREE < 2 || __GCC_ATOMIC_POINTER_LOCK_FREE < 2))
+#include <algorithm>
+
+// FIXME: Is there a better way to check for std::future not being supported ?
+#if defined(AF_DISABLE_CPU_ASYNC) || \
+    (defined(__GNUC__) &&            \
+     (__GCC_ATOMIC_INT_LOCK_FREE < 2 || __GCC_ATOMIC_POINTER_LOCK_FREE < 2))
 
 #include <functional>
 using std::function;
 #include <err_cpu.hpp>
 #define __SYNCHRONOUS_ARCH 1
-class queue_impl
-{
-public:
-    template <typename F, typename... Args>
+class queue_impl {
+   public:
+    template<typename F, typename... Args>
     void enqueue(const F func, Args... args) const {
         AF_ERROR("Incorrectly configured", AF_ERR_INTERNAL);
     }
 
-    void sync() const {
-        AF_ERROR("Incorrectly configured", AF_ERR_INTERNAL);
-    }
+    void sync() const { AF_ERROR("Incorrectly configured", AF_ERR_INTERNAL); }
 
     bool is_worker() const {
         AF_ERROR("Incorrectly configured", AF_ERR_INTERNAL);
         return false;
     }
-
 };
 
 #else
 
-#include <async_queue.hpp>
+#include <threads/async_queue.hpp>
+#include <threads/event.hpp>
 #define __SYNCHRONOUS_ARCH 0
-typedef async_queue queue_impl;
+using queue_impl = threads::async_queue;
+using event_impl = threads::event;
 
 #endif
 
-#pragma once
-
+namespace arrayfire {
 namespace cpu {
 
 /// Wraps the async_queue class
-class queue
-{
-public:
+class queue {
+   public:
     queue()
-        :
-        count(0),
-        sync_calls( __SYNCHRONOUS_ARCH == 1 || getEnvVar("AF_SYNCHRONOUS_CALLS") == "1")
-    {}
+        : count(0)
+        , sync_calls(__SYNCHRONOUS_ARCH == 1 ||
+                     common::getEnvVar("AF_SYNCHRONOUS_CALLS") == "1") {}
 
-    template <typename F, typename... Args>
-    void enqueue(const F func, Args... args)
-    {
+    template<typename F, typename... Args>
+    void enqueue(const F func, Args &&...args) {
         count++;
-        if(sync_calls) { func( args... ); }
-        else           { aQueue.enqueue( func, args... ); }
+        if (sync_calls) {
+            func(toParam(std::forward<Args>(args))...);
+        } else {
+            aQueue.enqueue(func, toParam(std::forward<Args>(args))...);
+        }
 #ifndef NDEBUG
         sync();
 #else
-        if (checkMemoryLimit() || count >= 25) {
+        if (getMemoryPressure() >= getMemoryPressureThreshold() ||
+            count >= 25) {
             sync();
         }
 #endif
     }
 
-    void sync()
-    {
+    void sync() {
         count = 0;
-        if(!sync_calls) aQueue.sync();
+        if (!sync_calls) aQueue.sync();
     }
 
-    bool is_worker() const
-    {
+    bool is_worker() const {
         return (!sync_calls) ? aQueue.is_worker() : false;
     }
 
-    private:
-        int count;
-        const bool sync_calls;
-        queue_impl aQueue;
+    friend class queue_event;
+
+   private:
+    int count;
+    const bool sync_calls;
+    queue_impl aQueue;
 };
 
-}
+class queue_event {
+    event_impl event_;
+
+   public:
+    queue_event() = default;
+    queue_event(int val) : event_(val) {}
+
+    int create() { return event_.create(); }
+
+    int mark(queue &q) { return event_.mark(q.aQueue); }
+    int wait(queue &q) { return event_.wait(q.aQueue); }
+    int sync() noexcept { return event_.sync(); }
+    operator bool() const noexcept { return event_; }
+};
+}  // namespace cpu
+}  // namespace arrayfire

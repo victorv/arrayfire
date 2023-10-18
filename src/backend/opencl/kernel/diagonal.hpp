@@ -7,121 +7,73 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
+
+#include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
+#include <debug_opencl.hpp>
+#include <kernel/config.hpp>
 #include <kernel_headers/diag_create.hpp>
 #include <kernel_headers/diag_extract.hpp>
-#include <program.hpp>
-#include "../traits.hpp"
-#include <dispatch.hpp>
-#include <Param.hpp>
-#include <debug_opencl.hpp>
-#include <map>
-#include <mutex>
 #include <math.hpp>
-#include "config.hpp"
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
-using af::scalar_to_option;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace kernel
-{
+template<typename T>
+static void diagCreate(Param out, Param in, int num) {
+    std::array<TemplateArg, 1> targs = {
+        TemplateTypename<T>(),
+    };
+    std::array<std::string, 3> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(ZERO, scalar_to_option(scalar<T>(0))),
+        getTypeBuildDefinition<T>()};
 
-    template<typename T>
-    static void diagCreate(Param out, Param in, int num)
-    {
-        try {
-            static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-            static std::map<int, Program*>   diagCreateProgs;
-            static std::map<int, Kernel*>  diagCreateKernels;
+    auto diagCreate = common::getKernel("diagCreateKernel",
+                                        {{diag_create_cl_src}}, targs, options);
 
-            int device = getActiveDeviceId();
+    cl::NDRange local(32, 8);
+    int groups_x = divup(out.info.dims[0], local[0]);
+    int groups_y = divup(out.info.dims[1], local[1]);
+    cl::NDRange global(groups_x * local[0] * out.info.dims[2],
+                       groups_y * local[1]);
 
-            std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D T="    << dtype_traits<T>::getName()
-                            << " -D ZERO=(T)(" << scalar_to_option(scalar<T>(0)) << ")";
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, diag_create_cl, diag_create_cl_len, options.str());
-                    diagCreateProgs[device]   = new Program(prog);
-                    diagCreateKernels[device] = new Kernel(*diagCreateProgs[device],
-                                                           "diagCreateKernel");
-                });
-
-            NDRange local(32, 8);
-            int groups_x = divup(out.info.dims[0], local[0]);
-            int groups_y = divup(out.info.dims[1], local[1]);
-            NDRange global(groups_x * local[0] * out.info.dims[2],
-                           groups_y * local[1]);
-
-            auto diagCreateOp = KernelFunctor<Buffer, const KParam,
-                                            Buffer, const KParam,
-                                            int, int> (*diagCreateKernels[device]);
-
-            diagCreateOp(EnqueueArgs(getQueue(), global, local),
-                         *(out.data), out.info, *(in.data), in.info, num, groups_x);
-            CL_DEBUG_FINISH(getQueue());
-
-        } catch (cl::Error err) {
-            CL_TO_AF_ERROR(err);
-        }
-    }
-
-    template<typename T>
-    static void diagExtract(Param out, Param in, int num)
-    {
-        try {
-            static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-            static std::map<int, Program*>   diagExtractProgs;
-            static std::map<int, Kernel*>  diagExtractKernels;
-
-            int device = getActiveDeviceId();
-
-            std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D T="    << dtype_traits<T>::getName()
-                            << " -D ZERO=(T)(" << scalar_to_option(scalar<T>(0)) << ")";
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, diag_extract_cl, diag_extract_cl_len, options.str());
-                    diagExtractProgs[device]   = new Program(prog);
-                    diagExtractKernels[device] = new Kernel(*diagExtractProgs[device],
-                                                           "diagExtractKernel");
-                });
-
-            NDRange local(256, 1);
-            int groups_x = divup(out.info.dims[0], local[0]);
-            int groups_z = out.info.dims[2];
-            NDRange global(groups_x * local[0],
-                           groups_z * local[1] * out.info.dims[3]);
-
-            auto diagExtractOp = KernelFunctor<Buffer, const KParam,
-                                             Buffer, const KParam,
-                                             int, int> (*diagExtractKernels[device]);
-
-            diagExtractOp(EnqueueArgs(getQueue(), global, local),
-                          *(out.data), out.info, *(in.data), in.info, num, groups_z);
-            CL_DEBUG_FINISH(getQueue());
-
-        } catch (cl::Error err) {
-            CL_TO_AF_ERROR(err);
-        }
-    }
-
+    diagCreate(cl::EnqueueArgs(getQueue(), global, local), *(out.data),
+               out.info, *(in.data), in.info, num, groups_x);
+    CL_DEBUG_FINISH(getQueue());
 }
 
+template<typename T>
+static void diagExtract(Param out, Param in, int num) {
+    std::array<TemplateArg, 1> targs = {
+        TemplateTypename<T>(),
+    };
+    std::array<std::string, 3> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(ZERO, scalar_to_option(scalar<T>(0))),
+        getTypeBuildDefinition<T>()};
+
+    auto diagExtract = common::getKernel(
+        "diagExtractKernel", {{diag_extract_cl_src}}, targs, options);
+
+    cl::NDRange local(256, 1);
+    int groups_x = divup(out.info.dims[0], local[0]);
+    int groups_z = out.info.dims[2];
+    cl::NDRange global(groups_x * local[0],
+                       groups_z * local[1] * out.info.dims[3]);
+
+    diagExtract(cl::EnqueueArgs(getQueue(), global, local), *(out.data),
+                out.info, *(in.data), in.info, num, groups_z);
+    CL_DEBUG_FINISH(getQueue());
 }
+
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

@@ -7,26 +7,36 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
-#include <af/lapack.h>
-#include <af/defines.h>
-#include <err_common.hpp>
-#include <handle.hpp>
 #include <backend.hpp>
-#include <ArrayInfo.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/err_common.hpp>
+#include <complex.hpp>
+#include <copy.hpp>
+#include <handle.hpp>
+#include <logic.hpp>
 #include <qr.hpp>
 #include <reduce.hpp>
-#include <logic.hpp>
-#include <complex.hpp>
+#include <af/array.h>
+#include <af/defines.h>
+#include <af/lapack.h>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::createValueArray;
+using detail::getScalar;
+using detail::logicOp;
+using detail::reduce;
+using detail::reduce_all;
+using detail::scalar;
+using detail::uint;
 
 template<typename T>
-static inline uint rank(const af_array in, double tol)
-{
-    typedef typename af::dtype_traits<T>::base_type BT;
-    Array<T> In = getArray<T>(in);
+static inline uint rank(const af_array in, double tol) {
+    using BT          = typename af::dtype_traits<T>::base_type;
+    const Array<T> In = getArray<T>(in);
 
     Array<BT> R = createEmptyArray<BT>(dim4());
 
@@ -36,20 +46,20 @@ static inline uint rank(const af_array in, double tol)
         Array<T> r = createEmptyArray<T>(dim4());
         Array<T> t = createEmptyArray<T>(dim4());
         qr(q, r, t, In);
+        using detail::abs;
 
         R = abs<BT, T>(r);
     }
 
-    Array<BT> val = createValueArray<BT>(R.dims(), scalar<BT>(tol));
+    Array<BT> val  = createValueArray<BT>(R.dims(), scalar<BT>(tol));
     Array<char> gt = logicOp<BT, af_gt_t>(R, val, val.dims());
     Array<char> at = reduce<af_or_t, char, char>(gt, 1);
-    return reduce_all<af_notzero_t, char, uint>(at);
+    return getScalar<uint>(reduce_all<af_notzero_t, char, uint>(at));
 }
 
-af_err af_rank(uint *out, const af_array in, const double tol)
-{
+af_err af_rank(uint* out, const af_array in, const double tol) {
     try {
-        ArrayInfo i_info = getInfo(in);
+        const ArrayInfo& i_info = getInfo(in);
 
         if (i_info.ndims() > 2) {
             AF_ERROR("solve can not be used in batch mode", AF_ERR_BATCH);
@@ -57,20 +67,18 @@ af_err af_rank(uint *out, const af_array in, const double tol)
 
         af_dtype type = i_info.getType();
 
-        ARG_ASSERT(1, i_info.isFloating());                       // Only floating and complex types
+        ARG_ASSERT(1, i_info.isFloating());  // Only floating and complex types
+        ARG_ASSERT(0, out != nullptr);
 
-        uint output;
-        if(i_info.ndims() == 0) {
-            output = 0;
-            return AF_SUCCESS;
-        }
-
-        switch(type) {
-            case f32: output = rank<float  >(in, tol);  break;
-            case f64: output = rank<double >(in, tol);  break;
-            case c32: output = rank<cfloat >(in, tol);  break;
-            case c64: output = rank<cdouble>(in, tol);  break;
-            default:  TYPE_ERROR(1, type);
+        uint output = 0;
+        if (i_info.ndims() != 0) {
+            switch (type) {
+                case f32: output = rank<float>(in, tol); break;
+                case f64: output = rank<double>(in, tol); break;
+                case c32: output = rank<cfloat>(in, tol); break;
+                case c64: output = rank<cdouble>(in, tol); break;
+                default: TYPE_ERROR(1, type);
+            }
         }
         std::swap(*out, output);
     }

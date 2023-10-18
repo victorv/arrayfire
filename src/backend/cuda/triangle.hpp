@@ -9,11 +9,14 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T, bool is_upper, bool is_unit_diag>
-    void triangle(Array<T> &out, const Array<T> &in);
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+void triangle(Array<T> &out, const Array<T> &in, const bool is_upper,
+              const bool is_unit_diag);
 
-    template<typename T, bool is_upper, bool is_unit_diag>
-    Array<T> triangle(const Array<T> &in);
-}
+template<typename T>
+Array<T> triangle(const Array<T> &in, const bool is_upper,
+                  const bool is_unit_diag);
+}  // namespace cuda
+}  // namespace arrayfire

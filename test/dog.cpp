@@ -7,70 +7,75 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <gtest/gtest.h>
 #include <arrayfire.h>
+#include <gtest/gtest.h>
+#include <testHelpers.hpp>
 #include <af/dim4.hpp>
 #include <af/traits.hpp>
 #include <af/vision.h>
 #include <string>
 #include <vector>
-#include <testHelpers.hpp>
+
+using af::array;
+using af::convolve2;
+using af::dim4;
+using af::dog;
+using af::dtype_traits;
+using af::exception;
+using af::gaussianKernel;
+using af::randu;
+using af::sum;
 
 template<typename T>
-class DOG : public ::testing::Test
-{
-    public:
-        virtual void SetUp() {}
+class DOG : public ::testing::Test {
+   public:
+    virtual void SetUp() {}
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<float, double, int, uint, char, uchar, short, ushort> TestTypes;
+typedef ::testing::Types<float, double, int, uint, char, uchar, short, ushort>
+    TestTypes;
 
 // register the type list
-TYPED_TEST_CASE(DOG, TestTypes);
+TYPED_TEST_SUITE(DOG, TestTypes);
 
+TYPED_TEST(DOG, Basic) {
+    SUPPORTED_TYPE_CHECK(TypeParam);
 
-TYPED_TEST(DOG, Basic)
-{
-    if (noDoubleTests<TypeParam>()) return;
-
-    af::dim4 iDims(512, 512, 1, 1);
-    af::array in = af::constant(1, iDims, (af_dtype)af::dtype_traits<float>::af_type);
+    dim4 iDims(512, 512, 1, 1);
+    array in = constant(1, iDims, (af_dtype)dtype_traits<float>::af_type);
     /* calculate DOG using ArrayFire functions */
-    af::array k1    = af::gaussianKernel(3, 3);
-    af::array k2    = af::gaussianKernel(2, 2);
-    af::array smth1 = af::convolve2(in, k1);
-    af::array smth2 = af::convolve2(in, k2);
-    af::array diff  = smth1 - smth2;
+    array k1    = gaussianKernel(3, 3);
+    array k2    = gaussianKernel(2, 2);
+    array smth1 = convolve2(in, k1);
+    array smth2 = convolve2(in, k2);
+    array diff  = smth1 - smth2;
     /* calcuate DOG using new function */
-    af::array out= af::dog(in, 3, 2);
+    array out = dog(in, 3, 2);
     /* compare both the values */
-    float accumErr = af::sum<float>(out-diff);
-    EXPECT_EQ(true, accumErr<1.0e-2);
+    float accumErr = sum<float>(out - diff);
+    EXPECT_EQ(true, accumErr < 1.0e-2);
 }
 
-TYPED_TEST(DOG, Batch)
-{
-    if (noDoubleTests<TypeParam>()) return;
+TYPED_TEST(DOG, Batch) {
+    SUPPORTED_TYPE_CHECK(TypeParam);
 
-    af::dim4 iDims(512, 512, 3, 1);
-    af::array in = af::constant(1, iDims, (af_dtype)af::dtype_traits<float>::af_type);
+    dim4 iDims(512, 512, 3, 1);
+    array in = constant(1, iDims, (af_dtype)dtype_traits<float>::af_type);
     /* calculate DOG using ArrayFire functions */
-    af::array k1    = af::gaussianKernel(3, 3);
-    af::array k2    = af::gaussianKernel(2, 2);
-    af::array smth1 = af::convolve2(in, k1);
-    af::array smth2 = af::convolve2(in, k2);
-    af::array diff  = smth1 - smth2;
+    array k1    = gaussianKernel(3, 3);
+    array k2    = gaussianKernel(2, 2);
+    array smth1 = convolve2(in, k1);
+    array smth2 = convolve2(in, k2);
+    array diff  = smth1 - smth2;
     /* calcuate DOG using new function */
-    af::array out= af::dog(in, 3, 2);
+    array out = dog(in, 3, 2);
     /* compare both the values */
-    float accumErr = af::sum<float>(out-diff);
-    EXPECT_EQ(true, accumErr<1.0e-2);
+    float accumErr = sum<float>(out - diff);
+    EXPECT_EQ(true, accumErr < 1.0e-2);
 }
 
-TYPED_TEST(DOG, InvalidArray)
-{
-    af::array in = af::randu(512);
-    EXPECT_THROW(af::dog(in, 3, 2),
-                 af::exception);
+TYPED_TEST(DOG, InvalidArray) {
+    array in = randu(512);
+    EXPECT_THROW(dog(in, 3, 2), exception);
 }

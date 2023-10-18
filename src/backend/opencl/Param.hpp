@@ -8,17 +8,32 @@
  ********************************************************/
 
 #pragma once
-#include <platform.hpp>
+
+#include <cl2hpp.hpp>
 #include <kernel/KParam.hpp>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
 
-    typedef struct
-    {
-        cl::Buffer *data;
-        KParam info;
-    } Param;
+struct Param {
+    cl::Buffer* data;
+    KParam info;
+    Param& operator=(const Param& other) = default;
+    Param(const Param& other)            = default;
+    Param(Param&& other)                 = default;
 
-    Param makeParam(cl_mem mem, int off, int dims[4], int strides[4]);
-}
+    dim_t* dims_ptr() { return info.dims; }
+    dim_t* strides_ptr() { return info.strides; }
+
+    // AF_DEPRECATED("Use Array<T>")
+    Param();
+    // AF_DEPRECATED("Use Array<T>")
+    Param(cl::Buffer* data_, KParam info_);
+    ~Param() = default;
+};
+
+// AF_DEPRECATED("Use Array<T>")
+Param makeParam(cl::Buffer& mem, int off, const int dims[4],
+                const int strides[4]);
+}  // namespace opencl
+}  // namespace arrayfire

@@ -9,55 +9,67 @@
 
 #pragma once
 
-#include <defines.hpp>
+#include <common/defines.hpp>
+#include <common/traits.hpp>
 #include <types.hpp>
-#include <af/traits.hpp>
-#include <string>
-#include <sstream>
 
-namespace af
-{
+#include <sstream>
+#include <string>
+
+namespace af {
 
 template<>
-struct dtype_traits<cl_float2> {
+struct dtype_traits<arrayfire::opencl::cfloat> {
     enum { af_type = c32 };
     typedef float base_type;
-    static const char* getName() { return "float2"; }
+    static const char *getName() { return "float2"; }
 };
 
 template<>
-struct dtype_traits<cl_double2> {
+struct dtype_traits<arrayfire::opencl::cdouble> {
     enum { af_type = c64 };
     typedef double base_type;
-    static const char* getName() { return "double2"; }
+    static const char *getName() { return "double2"; }
 };
+}  // namespace af
 
-template<typename T> static bool iscplx() { return false; }
-template<> STATIC_ bool iscplx<cl_float2>() { return true; }
-template<> STATIC_ bool iscplx<cl_double2>() { return true; }
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
-STATIC_
-std::string scalar_to_option(const T &val)
-{
-    return std::to_string(+val);
+static bool iscplx() {
+    return false;
+}
+template<>
+inline bool iscplx<cfloat>() {
+    return true;
+}
+template<>
+inline bool iscplx<cdouble>() {
+    return true;
+}
+
+template<typename T>
+inline std::string scalar_to_option(const T &val) {
+    using namespace arrayfire::common;
+    using std::to_string;
+    return to_string(+val);
 }
 
 template<>
-STATIC_
-std::string scalar_to_option<cl_float2>(const cl_float2 &val) {
+inline std::string scalar_to_option<cl_float2>(const cl_float2 &val) {
     std::ostringstream ss;
     ss << val.s[0] << "," << val.s[1];
     return ss.str();
 }
 
 template<>
-STATIC_
-std::string scalar_to_option<cl_double2>(const cl_double2 &val) {
+inline std::string scalar_to_option<cl_double2>(const cl_double2 &val) {
     std::ostringstream ss;
     ss << val.s[0] << "," << val.s[1];
     return ss.str();
-}
 }
 
 using af::dtype_traits;
+}  // namespace opencl
+}  // namespace arrayfire

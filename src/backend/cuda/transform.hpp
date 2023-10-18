@@ -9,10 +9,11 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T>
-    Array<T> transform(const Array<T> &in, const Array<float> &tf, const af::dim4 &odims,
-                       const af_interp_type method, const bool inverse,
-                       const bool perspective);
-}
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+void transform(Array<T> &out, const Array<T> &in, const Array<float> &tf,
+               const af_interp_type method, const bool inverse,
+               const bool perspective);
+}  // namespace cuda
+}  // namespace arrayfire

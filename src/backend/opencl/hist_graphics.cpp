@@ -7,32 +7,31 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
-#include <interopManager.hpp>
 #include <Array.hpp>
-#include <hist_graphics.hpp>
-#include <err_opencl.hpp>
+#include <GraphicsResourceManager.hpp>
 #include <debug_opencl.hpp>
+#include <err_opencl.hpp>
+#include <hist_graphics.hpp>
 
-namespace opencl
-{
-using namespace gl;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
-void copy_histogram(const Array<T> &data, const forge::Histogram* hist)
-{
+void copy_histogram(const Array<T> &data, fg_histogram hist) {
+    ForgeModule &_ = forgePlugin();
     if (isGLSharingSupported()) {
         CheckGL("Begin OpenCL resource copy");
         const cl::Buffer *d_P = data.get();
-        size_t bytes = hist->verticesSize();
+        unsigned bytes        = 0;
+        FG_CHECK(_.fg_get_histogram_vertex_buffer_size(&bytes, hist));
 
-        InteropManager& intrpMngr = InteropManager::getInstance();
-
-        cl::Buffer **resources = intrpMngr.getBufferResource(hist);
+        auto res = interopManager().getHistogramResources(hist);
 
         std::vector<cl::Memory> shared_objects;
-        shared_objects.push_back(*resources[0]);
+        shared_objects.push_back(*(res[0].get()));
 
         glFinish();
 
@@ -42,18 +41,24 @@ void copy_histogram(const Array<T> &data, const forge::Histogram* hist)
 
         getQueue().enqueueAcquireGLObjects(&shared_objects, NULL, &event);
         event.wait();
-        getQueue().enqueueCopyBuffer(*d_P, *resources[0], 0, 0, bytes, NULL, &event);
+        getQueue().enqueueCopyBuffer(*d_P, *(res[0].get()), 0, 0, bytes, NULL,
+                                     &event);
         getQueue().enqueueReleaseGLObjects(&shared_objects, NULL, &event);
         event.wait();
 
         CL_DEBUG_FINISH(getQueue());
         CheckGL("End OpenCL resource copy");
     } else {
+        unsigned bytes = 0, buffer = 0;
+        FG_CHECK(_.fg_get_histogram_vertex_buffer(&buffer, hist));
+        FG_CHECK(_.fg_get_histogram_vertex_buffer_size(&bytes, hist));
+
         CheckGL("Begin OpenCL fallback-resource copy");
-        glBindBuffer(GL_ARRAY_BUFFER, hist->vertices());
-        GLubyte* ptr = (GLubyte*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+        auto *ptr =
+            static_cast<GLubyte *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
         if (ptr) {
-            getQueue().enqueueReadBuffer(*data.get(), CL_TRUE, 0, hist->verticesSize(), ptr);
+            getQueue().enqueueReadBuffer(*data.get(), CL_TRUE, 0, bytes, ptr);
             glUnmapBuffer(GL_ARRAY_BUFFER);
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -61,8 +66,8 @@ void copy_histogram(const Array<T> &data, const forge::Histogram* hist)
     }
 }
 
-#define INSTANTIATE(T)  \
-    template void copy_histogram<T>(const Array<T> &data, const forge::Histogram* hist);
+#define INSTANTIATE(T) \
+    template void copy_histogram<T>(const Array<T> &, fg_histogram);
 
 INSTANTIATE(float)
 INSTANTIATE(int)
@@ -71,6 +76,5 @@ INSTANTIATE(short)
 INSTANTIATE(ushort)
 INSTANTIATE(uchar)
 
-}
-
-#endif  // WITH_GRAPHICS
+}  // namespace opencl
+}  // namespace arrayfire

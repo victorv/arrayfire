@@ -572,17 +572,26 @@ AFAPI array colorSpace(const array& image, const CSpace to, const CSpace from);
 
 #if AF_API_VERSION >= 31
 /**
-   C++ Interface wrapper for unwrap
+   C++ Interface for rearranging windowed sections of an input into columns
+   (or rows)
 
-   \param[in]  in is the input image (or set of images)
-   \param[in]  wx is the block window size along 0th-dimension between [1, input.dims[0] + px]
-   \param[in]  wy is the block window size along 1st-dimension between [1, input.dims[1] + py]
-   \param[in]  sx is the stride along 0th-dimension
-   \param[in]  sy is the stride along 1st-dimension
-   \param[in]  px is the padding along 0th-dimension between [0, wx). Padding is applied both before and after.
-   \param[in]  py is the padding along 1st-dimension between [0, wy). Padding is applied both before and after.
-   \param[in]  is_column specifies the layout for the unwrapped patch. If is_column is false, the unrapped patch is laid out as a row.
-   \returns    an array with the image blocks as rows or columns
+   \param[in]  in is the input array
+   \param[in]  wx is the window size along dimension 0
+   \param[in]  wy is the window size along dimension 1
+   \param[in]  sx is the stride along dimension 0
+   \param[in]  sy is the stride along dimension 1
+   \param[in]  px is the padding along dimension 0
+   \param[in]  py is the padding along dimension 1
+   \param[in]  is_column determines whether the section becomes a column (if
+               true) or a row (if false)
+   \returns    an array with the input's sections rearraged as columns (or rows)
+
+   \note \p in can hold multiple images for processing if it is three or
+         four-dimensional
+   \note \p wx and \p wy must be between [1, input.dims(0 (1)) + px (py)]
+   \note \p sx and \p sy must be greater than 1
+   \note \p px and \p py must be between [0, wx (wy) - 1]. Padding becomes part of
+         the input image prior to the windowing
 
    \ingroup image_func_unwrap
 */
@@ -593,19 +602,34 @@ AFAPI array unwrap(const array& in, const dim_t wx, const dim_t wy,
 
 #if AF_API_VERSION >= 31
 /**
-   C++ Interface wrapper for wrap
+   C++ Interface for performing the opposite of \ref unwrap
 
-   \param[in]  in is the input image (or set of images)
-   \param[in]  ox is the 0th-dimension of output
-   \param[in]  oy is the ist-dimension of output
-   \param[in]  wx is the block window size along 0th-dimension between
-   \param[in]  wy is the block window size along 1st-dimension between
-   \param[in]  sx is the stride along 0th-dimension
-   \param[in]  sy is the stride along 1st-dimension
-   \param[in]  px is the padding used along 0th-dimension between [0, wx).
-   \param[in]  py is the padding used along 1st-dimension between [0, wy).
-   \param[in]  is_column specifies the layout for the unwrapped patch. If is_column is false, the rows are treated as patches
-   \returns    an array of images after converting rows or columns into image windows
+   \param[in]  in is the input array
+   \param[in]  ox is the output's dimension 0 size
+   \param[in]  oy is the output's dimension 1 size
+   \param[in]  wx is the window size along dimension 0
+   \param[in]  wy is the window size along dimension 1
+   \param[in]  sx is the stride along dimension 0
+   \param[in]  sy is the stride along dimension 1
+   \param[in]  px is the padding along dimension 0
+   \param[in]  py is the padding along dimension 1
+   \param[in]  is_column determines whether an output patch is formed from a
+               column (if true) or a row (if false)
+   \returns    an array with the input's columns (or rows) reshaped as patches
+
+   \note Wrap is typically used to recompose an unwrapped image. If this is the
+         case, use the same parameters that were used in \ref unwrap(). Also
+         use the original image size (before unwrap) for \p ox and \p oy.
+   \note The window/patch size, \p wx \f$\times\f$ \p wy, must equal
+         `input.dims(0)` (or `input.dims(1)` if \p is_column is false).
+   \note \p sx and \p sy must be at least 1
+   \note \p px and \p py must be between [0, wx) and [0, wy), respectively
+   \note The number of patches, `input.dims(1)` (or `input.dims(0)` if
+         \p is_column is false), must equal \f$nx \times\ ny\f$, where
+         \f$\displaystyle nx = \frac{ox + 2px - wx}{sx} + 1\f$ and
+         \f$\displaystyle ny = \frac{oy + 2py - wy}{sy} + 1\f$
+   \note Batched wrap can be performed on multiple 2D slices at once if \p in
+         is three or four-dimensional
 
    \ingroup image_func_wrap
 */
@@ -688,6 +712,164 @@ AFAPI void moments(double* out, const array& in, const momentType moment=AF_MOME
 AFAPI array moments(const array& in, const momentType moment=AF_MOMENT_FIRST_ORDER);
 #endif
 
+#if AF_API_VERSION >= 35
+/**
+   C++ Interface for canny edge detector
+
+   \param[in] in                  is the input image
+   \param[in] thresholdType       determines if user set high threshold is to be used or not. It
+                                  can take values defined by the enum \ref af_canny_threshold
+   \param[in] lowThresholdRatio   is the lower threshold % of maximum or auto-derived high threshold
+   \param[in] highThresholdRatio  is the higher threshold % of maximum value in gradient image used
+                                  in hysteresis procedure. This value is ignored if
+                                  \ref AF_CANNY_THRESHOLD_AUTO_OTSU is chosen as
+                                  \ref af_canny_threshold
+   \param[in] sobelWindow     is the window size of sobel kernel for computing gradient direction and
+                              magnitude
+   \param[in] isFast     indicates if L<SUB>1</SUB> norm(faster but less accurate) is used to compute
+                         image gradient magnitude instead of L<SUB>2</SUB> norm.
+   \return binary array containing edges
+
+   \ingroup image_func_canny
+*/
+AFAPI array canny(const array& in, const cannyThreshold thresholdType,
+                  const float lowThresholdRatio, const float highThresholdRatio,
+                  const unsigned sobelWindow = 3, const bool isFast = false);
+#endif
+
+#if AF_API_VERSION >= 36
+/**
+   C++ Interface for gradient anisotropic(non-linear diffusion) smoothing
+
+   \param[in] in is the input image, expects non-integral (float/double) typed af::array
+   \param[in] timestep is the time step used in solving the diffusion equation.
+   \param[in] conductance parameter controls the sensitivity of conductance in diffusion equation.
+   \param[in] iterations is the number of times the diffusion step is performed.
+   \param[in] fftype indicates whether quadratic or exponential flux function is used by algorithm.
+    \param[in] diffusionKind will let the user choose what kind of diffusion method to perform. It will take
+               any value of enum \ref diffusionEq
+   \return A filtered image that is of same size as the input.
+
+   \ingroup image_func_anisotropic_diffusion
+*/
+AFAPI array anisotropicDiffusion(const af::array& in, const float timestep,
+                                 const float conductance, const unsigned iterations,
+                                 const fluxFunction fftype=AF_FLUX_EXPONENTIAL,
+                                 const diffusionEq diffusionKind=AF_DIFFUSION_GRAD);
+#endif
+
+#if AF_API_VERSION >= 37
+/**
+  C++ Interface for Iterative deconvolution algorithm
+
+  \param[in] in is the blurred input image
+  \param[in] ker is the kernel(point spread function) known to have caused
+             the blur in the system
+  \param[in] iterations is the number of iterations the algorithm will run
+  \param[in] relaxFactor is the relaxation factor multiplied with distance
+             of estimate from observed image.
+  \param[in] algo takes value of type enum \ref af_iterative_deconv_algo
+             indicating the iterative deconvolution algorithm to be used
+  \return sharp image estimate generated from the blurred input
+
+  \note \p relax_factor argument is ignore when it
+  \ref AF_ITERATIVE_DECONV_RICHARDSONLUCY algorithm is used.
+
+  \ingroup image_func_iterative_deconv
+ */
+AFAPI array iterativeDeconv(const array& in, const array& ker,
+                            const unsigned iterations, const float relaxFactor,
+                            const iterativeDeconvAlgo algo);
+
+/**
+   C++ Interface for Tikhonov deconvolution algorithm
+
+   \param[in] in is the blurred input image
+   \param[in] psf is the kernel(point spread function) known to have caused
+              the blur in the system
+   \param[in] gamma is a user defined regularization constant
+   \param[in] algo takes different meaning depending on the algorithm chosen.
+              If \p algo is AF_INVERSE_DECONV_TIKHONOV, then \p gamma is
+              a user defined regularization constant.
+   \return sharp image estimate generated from the blurred input
+
+   \ingroup image_func_inverse_deconv
+ */
+AFAPI array inverseDeconv(const array& in, const array& psf,
+                          const float gamma, const inverseDeconvAlgo algo);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] seeds is an af::array of x & y coordinates of the seed points
+              with coordinate values along columns of this af::array i.e. they
+              are not stored in interleaved fashion.
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const array &seeds,
+                         const unsigned radius,
+                         const unsigned multiplier, const int iter,
+                         const double segmentedValue);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] seedx is an af::array of x coordinates of the seed points
+   \param[in] seedy is an af::array of y coordinates of the seed points
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const array &seedx,
+                         const array &seedy, const unsigned radius,
+                         const unsigned multiplier, const int iter,
+                         const double segmentedValue);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] num_seeds is the total number of seeds
+   \param[in] seedx is an array of x coordinates of the seed points
+   \param[in] seedy is an array of y coordinates of the seed points
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const size_t num_seeds,
+                         const unsigned *seedx, const unsigned *seedy,
+                         const unsigned radius, const unsigned multiplier,
+                         const int iter, const double segmentedValue);
+
+#endif
 }
 #endif
 
@@ -863,14 +1045,15 @@ extern "C" {
     /**
        C Interface for transforming an image
 
-       \param[out] out will contain the transformed image
-       \param[in] in is input image
-       \param[in] transform is transformation matrix
-       \param[in] odim0 is the first output dimension
-       \param[in] odim1 is the second output dimension
-       \param[in] method is the interpolation type (Nearest by default)
-       \param[in] inverse if true applies inverse transform, if false applies forward transoform
-       \return     \ref AF_SUCCESS if the color transformation is successful,
+       \param[out] out       will contain the transformed image
+       \param[in]  in        is input image
+       \param[in]  transform is transformation matrix
+       \param[in]  odim0     is the first output dimension
+       \param[in]  odim1     is the second output dimension
+       \param[in]  method    is the interpolation type (Nearest by default)
+       \param[in]  inverse   if true applies inverse transform, if false applies forward transoform
+
+       \return \ref AF_SUCCESS if the color transformation is successful,
        otherwise an appropriate error code is returned.
 
        \ingroup transform_func_transform
@@ -878,6 +1061,35 @@ extern "C" {
     AFAPI af_err af_transform(af_array *out, const af_array in, const af_array transform,
                               const dim_t odim0, const dim_t odim1,
                               const af_interp_type method, const bool inverse);
+
+#if AF_API_VERSION >= 37
+    /**
+       C Interface for the version of \ref af_transform that accepts a
+       preallocated output array
+
+       \param[out] out       will contain the transformed image
+       \param[in]  in        is input image
+       \param[in]  transform is transformation matrix
+       \param[in]  odim0     is the first output dimension
+       \param[in]  odim1     is the second output dimension
+       \param[in]  method    is the interpolation type (Nearest by default)
+       \param[in]  inverse   if true applies inverse transform, if false applies forward transoform
+
+       \return \ref AF_SUCCESS if the color transformation is successful,
+       otherwise an appropriate error code is returned.
+
+       \note \p out can either be a null or existing `af_array` object. If it is a
+             sub-array of an existing `af_array`, only the corresponding portion of
+             the `af_array` will be overwritten
+       \note Passing an `af_array` that has not been initialized to \p out will
+             cause undefined behavior.
+
+       \ingroup transform_func_transform
+    */
+    AFAPI af_err af_transform_v2(af_array *out, const af_array in, const af_array transform,
+                                 const dim_t odim0, const dim_t odim1,
+                                 const af_interp_type method, const bool inverse);
+#endif
 
 #if AF_API_VERSION >= 33
     /**
@@ -1242,19 +1454,29 @@ extern "C" {
 
 #if AF_API_VERSION >= 31
     /**
-       C Interface wrapper for unwrap
+       C Interface for rearranging windowed sections of an input into columns
+       (or rows)
 
-       \param[out] out is an array with image blocks as rows or columns.
-       \param[in]  in is the input image (or set of images)
-       \param[in]  wx is the block window size along 0th-dimension between [1, input.dims[0] + px]
-       \param[in]  wy is the block window size along 1st-dimension between [1, input.dims[1] + py]
-       \param[in]  sx is the stride along 0th-dimension
-       \param[in]  sy is the stride along 1st-dimension
-       \param[in]  px is the padding along 0th-dimension between [0, wx). Padding is applied both before and after.
-       \param[in]  py is the padding along 1st-dimension between [0, wy). Padding is applied both before and after.
-       \param[in]  is_column specifies the layout for the unwrapped patch. If is_column is false, the unrapped patch is laid out as a row.
-       \return     \ref AF_SUCCESS if the color transformation is successful,
-       otherwise an appropriate error code is returned.
+       \param[out] out is an array with the input's sections rearraged as columns
+                   (or rows)
+       \param[in]  in is the input array
+       \param[in]  wx is the window size along dimension 0
+       \param[in]  wy is the window size along dimension 1
+       \param[in]  sx is the stride along dimension 0
+       \param[in]  sy is the stride along dimension 1
+       \param[in]  px is the padding along dimension 0
+       \param[in]  py is the padding along dimension 1
+       \param[in]  is_column determines whether the section becomes a column (if
+                   true) or a row (if false)
+       \return     \ref AF_SUCCESS if unwrap is successful,
+                   otherwise an appropriate error code is returned.
+
+       \note \p in can hold multiple images for processing if it is three or
+             four-dimensional
+       \note \p wx and \p wy must be between [1, input.dims(0 (1)) + px (py)]
+       \note \p sx and \p sy must be greater than 1
+       \note \p px and \p py must be between [0, wx (wy) - 1]. Padding becomes
+             part of the input image prior to the windowing
 
        \ingroup image_func_unwrap
     */
@@ -1265,23 +1487,37 @@ extern "C" {
 
 #if AF_API_VERSION >= 31
     /**
-       C Interface wrapper for wrap
+       C Interface for performing the opposite of \ref af::unwrap()
 
-       \param[out] out is an array after converting
+       \param[out] out is an array with the input's columns (or rows) reshaped as
+                   patches
        \param[in]  in is the input array
-       \param[in]  ox is the 0th-dimension of \p out
-       \param[in]  oy is the ist-dimension of \p out
-       \param[in]  wx is the block window size along 0th-dimension between
-       \param[in]  wy is the block window size along 1st-dimension between
-       \param[in]  sx is the stride along 0th-dimension
-       \param[in]  sy is the stride along 1st-dimension
-       \param[in]  px is the padding used along 0th-dimension between [0, wx).
-       \param[in]  py is the padding used along 1st-dimension between [0, wy).
-       \param[in]  is_column specifies the layout for the unwrapped patch. If is_column is false, the rows are treated as the patches
+       \param[in]  ox is the output's dimension 0 size
+       \param[in]  oy is the output's dimension 1 size
+       \param[in]  wx is the window size along dimension 0
+       \param[in]  wy is the window size along dimension 1
+       \param[in]  sx is the stride along dimension 0
+       \param[in]  sy is the stride along dimension 1
+       \param[in]  px is the padding along dimension 0
+       \param[in]  py is the padding along dimension 1
+       \param[in]  is_column determines whether an output patch is formed from a
+                   column (if true) or a row (if false)
        \return     \ref AF_SUCCESS if the color transformation is successful,
        otherwise an appropriate error code is returned.
 
-       \note The padding used in \ref af_unwrap is calculated from the provided parameters
+       \note Wrap is typically used to recompose an unwrapped image. If this is the
+             case, use the same parameters that were used in \ref af::unwrap(). Also
+             use the original image size (before unwrap) for \p ox and \p oy.
+       \note The window/patch size, \p wx \f$\times\f$ \p wy, must equal
+             `input.dims(0)` (or `input.dims(1)` if \p is_column is false).
+       \note \p sx and \p sy must be at least 1
+       \note \p px and \p py must be between [0, wx) and [0, wy), respectively
+       \note The number of patches, `input.dims(1)` (or `input.dims(0)` if
+             \p is_column is false), must equal \f$nx \times\ ny\f$, where
+             \f$\displaystyle nx = \frac{ox + 2px - wx}{sx} + 1\f$ and
+             \f$\displaystyle ny = \frac{oy + 2py - wy}{sy} + 1\f$
+       \note Batched wrap can be performed on multiple 2D slices at once if \p in
+             is three or four-dimensional
 
        \ingroup image_func_wrap
     */
@@ -1292,6 +1528,52 @@ extern "C" {
                          const dim_t sx, const dim_t sy,
                          const dim_t px, const dim_t py,
                          const bool is_column);
+#endif
+
+#if AF_API_VERSION >= 37
+    /**
+       C Interface for the version of \ref af_wrap that accepts a
+       preallocated output array
+
+       \param[out] out is an array with the input's columns (or rows) reshaped as
+                   patches
+       \param[in]  in is the input array
+       \param[in]  ox is the output's dimension 0 size
+       \param[in]  oy is the output's dimension 1 size
+       \param[in]  wx is the window size along dimension 0
+       \param[in]  wy is the window size along dimension 1
+       \param[in]  sx is the stride along dimension 0
+       \param[in]  sy is the stride along dimension 1
+       \param[in]  px is the padding along dimension 0
+       \param[in]  py is the padding along dimension 1
+       \param[in]  is_column determines whether an output patch is formed from a
+                   column (if true) or a row (if false)
+       \return     \ref AF_SUCCESS if the color transformation is successful,
+       otherwise an appropriate error code is returned.
+
+       \note Wrap is typically used to recompose an unwrapped image. If this is the
+             case, use the same parameters that were used in \ref af::unwrap(). Also
+             use the original image size (before unwrap) for \p ox and \p oy.
+       \note The window/patch size, \p wx \f$\times\f$ \p wy, must equal
+             `input.dims(0)` (or `input.dims(1)` if \p is_column is false).
+       \note \p sx and \p sy must be at least 1
+       \note \p px and \p py must be between [0, wx) and [0, wy), respectively
+       \note The number of patches, `input.dims(1)` (or `input.dims(0)` if
+             \p is_column is false), must equal \f$nx \times\ ny\f$, where
+             \f$\displaystyle nx = \frac{ox + 2px - wx}{sx} + 1\f$ and
+             \f$\displaystyle ny = \frac{oy + 2py - wy}{sy} + 1\f$
+       \note Batched wrap can be performed on multiple 2D slices at once if \p in
+             is three or four-dimensional
+
+       \ingroup image_func_wrap
+    */
+    AFAPI af_err af_wrap_v2(af_array *out,
+                            const af_array in,
+                            const dim_t ox, const dim_t oy,
+                            const dim_t wx, const dim_t wy,
+                            const dim_t sx, const dim_t sy,
+                            const dim_t px, const dim_t py,
+                            const bool is_column);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -1373,6 +1655,139 @@ extern "C" {
        \ingroup image_func_moments
     */
     AFAPI af_err af_moments_all(double* out, const af_array in, const af_moment_type moment);
+#endif
+
+#if AF_API_VERSION >= 35
+    /**
+       C Interface for canny edge detector
+
+       \param[out] out is an binary array containing edges
+       \param[in] in is the input image
+       \param[in] threshold_type     determines if user set high threshold is to be used or not. It
+                                     can take values defined by the enum \ref af_canny_threshold
+       \param[in] low_threshold_ratio   is the lower threshold % of the maximum or auto-derived high
+                                        threshold
+       \param[in] high_threshold_ratio  is the higher threshold % of maximum value in gradient image
+                                        used in hysteresis procedure. This value is ignored if
+                                        \ref AF_CANNY_THRESHOLD_AUTO_OTSU is chosen as
+                                        \ref af_canny_threshold
+       \param[in] sobel_window      is the window size of sobel kernel for computing gradient direction
+                                    and magnitude
+       \param[in] is_fast indicates   if L<SUB>1</SUB> norm(faster but less accurate) is used to
+                                      compute image gradient magnitude instead of L<SUB>2</SUB> norm.
+       \return    \ref AF_SUCCESS if the moment calculation is successful,
+       otherwise an appropriate error code is returned.
+
+       \ingroup image_func_canny
+    */
+    AFAPI af_err af_canny(af_array* out, const af_array in,
+                          const af_canny_threshold threshold_type,
+                          const float low_threshold_ratio,
+                          const float high_threshold_ratio,
+                          const unsigned sobel_window, const bool is_fast);
+#endif
+
+#if AF_API_VERSION >= 36
+    /**
+       C Interface for anisotropic diffusion
+
+       It can do both gradient and curvature based anisotropic smoothing.
+
+       \param[out] out is an af_array containing anisotropically smoothed image pixel values
+       \param[in] in is the input image, expects non-integral (float/double) typed af_array
+       \param[in] timestep is the time step used in solving the diffusion equation.
+       \param[in] conductance parameter controls the sensitivity of conductance in diffusion equation.
+       \param[in] iterations is the number of times the diffusion step is performed.
+       \param[in] fftype indicates whether quadratic or exponential flux function is used by algorithm.
+       \param[in] diffusion_kind will let the user choose what kind of diffusion method to perform. It will take
+                  any value of enum \ref af_diffusion_eq
+       \return \ref AF_SUCCESS if the moment calculation is successful,
+       otherwise an appropriate error code is returned.
+
+       \ingroup image_func_anisotropic_diffusion
+    */
+    AFAPI af_err af_anisotropic_diffusion(af_array* out, const af_array in,
+                                          const float timestep,
+                                          const float conductance,
+                                          const unsigned iterations,
+                                          const af_flux_function fftype,
+                                          const af_diffusion_eq diffusion_kind);
+#endif
+
+#if AF_API_VERSION >= 37
+    /**
+       C Interface for Iterative deconvolution algorithm
+
+       \param[out] out is the sharp estimate generated from the blurred input
+       \param[in] in is the blurred input image
+       \param[in] ker is the kernel(point spread function) known to have caused
+                  the blur in the system
+       \param[in] iterations is the number of iterations the algorithm will run
+       \param[in] relax_factor is the relaxation factor multiplied with
+                  distance of estimate from observed image.
+       \param[in] algo takes value of type enum \ref af_iterative_deconv_algo
+                  indicating the iterative deconvolution algorithm to be used
+       \return \ref AF_SUCCESS if the deconvolution is successful,
+       otherwise an appropriate error code is returned.
+
+       \note \p relax_factor argument is ignore when it
+       \ref AF_ITERATIVE_DECONV_RICHARDSONLUCY algorithm is used.
+
+       \ingroup image_func_iterative_deconv
+     */
+    AFAPI af_err af_iterative_deconv(af_array* out,
+                                     const af_array in, const af_array ker,
+                                     const unsigned iterations,
+                                     const float relax_factor,
+                                     const af_iterative_deconv_algo algo);
+
+    /**
+       C Interface for Tikhonov deconvolution algorithm
+
+       \param[out] out is the sharp estimate generated from the blurred input
+       \param[in] in is the blurred input image
+       \param[in] psf is the kernel(point spread function) known to have caused
+                  the blur in the system
+       \param[in] gamma takes different meaning depending on the algorithm
+                  chosen. If \p algo is AF_INVERSE_DECONV_TIKHONOV, then
+                  \p gamma is a user defined regularization constant.
+       \param[in] algo takes value of type enum \ref af_inverse_deconv_algo
+                  indicating the inverse deconvolution algorithm to be used
+       \return \ref AF_SUCCESS if the deconvolution is successful,
+       otherwise an appropriate error code is returned.
+
+       \ingroup image_func_inverse_deconv
+     */
+    AFAPI af_err af_inverse_deconv(af_array* out, const af_array in,
+                                   const af_array psf, const float gamma,
+                                   const af_inverse_deconv_algo algo);
+
+    /**
+       C Interface for confidence connected components
+
+       \param[out] out is the output af_array having the connected components
+       \param[in] in is the input image, expects non-integral (float/double)
+                  typed af_array
+       \param[in] seedx is an af_array of x coordinates of the seed points
+       \param[in] seedy is an af_array of y coordinates of the seed points
+       \param[in] radius is the neighborhood region to be considered around
+                  each seed point
+       \param[in] multiplier controls the threshold range computed from
+                  the mean and variance of seed point neighborhoods
+       \param[in] iter is number of iterations
+       \param[in] segmented_value is the value to which output array valid
+                  pixels are set to.
+       \return \ref AF_SUCCESS if the execution is successful, otherwise an
+       appropriate error code is returned.
+
+       \ingroup image_func_confidence_cc
+    */
+    AFAPI af_err af_confidence_cc(af_array *out, const af_array in,
+                                  const af_array seedx, const af_array seedy,
+                                  const unsigned radius,
+                                  const unsigned multiplier, const int iter,
+                                  const double segmented_value);
+
 #endif
 
 #ifdef __cplusplus

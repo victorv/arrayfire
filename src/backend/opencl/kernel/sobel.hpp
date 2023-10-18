@@ -8,85 +8,55 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/sobel.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/sobel.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-
-namespace kernel
-{
-
-static const int THREADS_X = 16;
-static const int THREADS_Y = 16;
-
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 template<typename Ti, typename To, unsigned ker_size>
-void sobel(Param dx, Param dy, const Param in)
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*>  sobProgs;
-        static std::map<int, Kernel*> sobKernels;
+void sobel(Param dx, Param dy, const Param in) {
+    constexpr int THREADS_X = 16;
+    constexpr int THREADS_Y = 16;
 
-        int device = getActiveDeviceId();
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<Ti>(),
+        TemplateTypename<To>(),
+        TemplateArg(ker_size),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(Ti, dtype_traits<Ti>::getName()),
+        DefineKeyValue(To, dtype_traits<To>::getName()),
+        DefineKeyValue(KER_SIZE, ker_size),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<Ti>());
 
-        std::call_once( compileFlags[device], [device] () {
+    auto sobel =
+        common::getKernel("sobel3x3", {{sobel_cl_src}}, targs, compileOpts);
 
-                std::ostringstream options;
-                options << " -D Ti=" << dtype_traits<Ti>::getName()
-                        << " -D To=" << dtype_traits<To>::getName()
-                        << " -D KER_SIZE="<< ker_size;
-                if (std::is_same<Ti, double>::value) {
-                    options << " -D USE_DOUBLE";
-                }
-                Program prog;
-                buildProgram(prog, sobel_cl, sobel_cl_len, options.str());
-                sobProgs[device]   = new Program(prog);
-                sobKernels[device] = new Kernel(*sobProgs[device], "sobel3x3");
-            });
+    cl::NDRange local(THREADS_X, THREADS_Y);
 
-        NDRange local(THREADS_X, THREADS_Y);
+    int blk_x = divup(in.info.dims[0], THREADS_X);
+    int blk_y = divup(in.info.dims[1], THREADS_Y);
 
-        int blk_x = divup(in.info.dims[0], THREADS_X);
-        int blk_y = divup(in.info.dims[1], THREADS_Y);
-
-        NDRange global(blk_x * in.info.dims[2] * THREADS_X,
+    cl::NDRange global(blk_x * in.info.dims[2] * THREADS_X,
                        blk_y * in.info.dims[3] * THREADS_Y);
+    size_t loc_size =
+        (THREADS_X + ker_size - 1) * (THREADS_Y + ker_size - 1) * sizeof(Ti);
 
-        auto sobelOp = KernelFunctor<Buffer, KParam,
-                                   Buffer, KParam,
-                                   Buffer, KParam,
-                                   cl::LocalSpaceArg,
-                                   int, int> (*sobKernels[device]);
-
-        size_t loc_size = (THREADS_X+ker_size-1)*(THREADS_Y+ker_size-1)*sizeof(Ti);
-
-        sobelOp(EnqueueArgs(getQueue(), global, local),
-                    *dx.data, dx.info, *dy.data, dy.info,
-                    *in.data, in.info, cl::Local(loc_size), blk_x, blk_y);
-
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
-    }
+    sobel(cl::EnqueueArgs(getQueue(), global, local), *dx.data, dx.info,
+          *dy.data, dy.info, *in.data, in.info, cl::Local(loc_size), blk_x,
+          blk_y);
+    CL_DEBUG_FINISH(getQueue());
 }
-
-}
-
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

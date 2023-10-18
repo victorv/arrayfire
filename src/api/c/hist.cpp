@@ -7,91 +7,148 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/graphics.h>
-#include <graphics_common.hpp>
-#include <ArrayInfo.hpp>
-#include <err_common.hpp>
 #include <backend.hpp>
-#include <reduce.hpp>
-#include <cast.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/cast.hpp>
+#include <common/err_common.hpp>
+#include <common/graphics_common.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <hist_graphics.hpp>
+#include <platform.hpp>
+#include <reduce.hpp>
+#include <af/graphics.h>
 
-using af::dim4;
-using namespace detail;
-
-#if defined(WITH_GRAPHICS)
-using namespace graphics;
+using arrayfire::common::ForgeManager;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+using arrayfire::common::getGLType;
+using arrayfire::common::makeContextCurrent;
+using arrayfire::common::step_round;
+using detail::Array;
+using detail::copy_histogram;
+using detail::forgeManager;
+using detail::getScalar;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
 
 template<typename T>
-forge::Chart* setup_histogram(const forge::Window* const window,
-                              const af_array in, const double minval, const double maxval,
-                              const af_cell* const props)
-{
-    Array<T> histogramInput = getArray<T>(in);
-    dim_t nBins = histogramInput.elements();
+fg_chart setup_histogram(fg_window const window, const af_array in,
+                         const double minval, const double maxval,
+                         const af_cell* const props) {
+    ForgeModule& _ = forgePlugin();
+
+    const Array<T> histogramInput = getArray<T>(in);
+    dim_t nBins                   = histogramInput.elements();
 
     // Retrieve Forge Histogram with nBins and array type
-    ForgeManager& fgMngr = ForgeManager::getInstance();
+    ForgeManager& fgMngr = forgeManager();
 
     // Get the chart for the current grid position (if any)
-    forge::Chart* chart = NULL;
-    if (props->col>-1 && props->row>-1)
+    fg_chart chart = NULL;
+    if (props->col > -1 && props->row > -1) {
         chart = fgMngr.getChart(window, props->row, props->col, FG_CHART_2D);
-    else
+    } else {
         chart = fgMngr.getChart(window, 0, 0, FG_CHART_2D);
+    }
 
     // Create a histogram for the chart
-    forge::Histogram* hist = fgMngr.getHistogram(chart, nBins, getGLType<T>());
+    fg_histogram hist = fgMngr.getHistogram(chart, nBins, getGLType<T>());
 
-    // Set histogram bar colors to orange
-    hist->setColor(0.929f, 0.486f, 0.2745f, 1.0f);
+    // Set histogram bar colors to ArrayFire's orange
+    FG_CHECK(_.fg_set_histogram_color(hist, 0.929f, 0.486f, 0.2745f, 1.0f));
+
+    // If chart axes limits do not have a manual override
+    // then compute and set axes limits
+    if (!fgMngr.getChartAxesOverride(chart)) {
+        float xMin, xMax, yMin, yMax, zMin, zMax;
+        FG_CHECK(_.fg_get_chart_axes_limits(&xMin, &xMax, &yMin, &yMax, &zMin,
+                                            &zMax, chart));
+        T freqMax =
+            getScalar<T>(detail::reduce_all<af_max_t, T, T>(histogramInput));
+
+        if (xMin == 0 && xMax == 0 && yMin == 0 && yMax == 0) {
+            // No previous limits. Set without checking
+            xMin = static_cast<float>(step_round(minval, false));
+            xMax = static_cast<float>(step_round(maxval, true));
+            yMax = static_cast<float>(step_round(freqMax, true));
+            // For histogram, always set yMin to 0.
+            yMin = 0;
+        } else {
+            if (xMin > minval) {
+                xMin = static_cast<float>(step_round(minval, false));
+            }
+            if (xMax < maxval) {
+                xMax = static_cast<float>(step_round(maxval, true));
+            }
+            if (yMax < freqMax) {
+                yMax = static_cast<float>(step_round(freqMax, true));
+            }
+            // For histogram, always set yMin to 0.
+            yMin = 0;
+        }
+        FG_CHECK(_.fg_set_chart_axes_limits(chart, xMin, xMax, yMin, yMax, zMin,
+                                            zMax));
+    }
 
     copy_histogram<T>(histogramInput, hist);
 
     return chart;
 }
-#endif
 
-af_err af_draw_hist(const af_window wind, const af_array X, const double minval, const double maxval,
-                    const af_cell* const props)
-{
-#if defined(WITH_GRAPHICS)
-    if(wind==0) {
-        std::cerr<<"Not a valid window"<<std::endl;
-        return AF_SUCCESS;
-    }
-
+af_err af_draw_hist(const af_window window, const af_array X,
+                    const double minval, const double maxval,
+                    const af_cell* const props) {
     try {
-        ArrayInfo Xinfo = getInfo(X);
-        af_dtype Xtype  = Xinfo.getType();
+        if (window == 0) { AF_ERROR("Not a valid window", AF_ERR_INTERNAL); }
+
+        const ArrayInfo& Xinfo = getInfo(X);
+        af_dtype Xtype         = Xinfo.getType();
 
         ARG_ASSERT(0, Xinfo.isVector());
 
-        forge::Window* window = reinterpret_cast<forge::Window*>(wind);
         makeContextCurrent(window);
 
-        forge::Chart* chart = NULL;
+        fg_chart chart = NULL;
 
-        switch(Xtype) {
-            case f32: chart = setup_histogram<float  >(window, X, minval, maxval, props); break;
-            case s32: chart = setup_histogram<int    >(window, X, minval, maxval, props); break;
-            case u32: chart = setup_histogram<uint   >(window, X, minval, maxval, props); break;
-            case s16: chart = setup_histogram<short  >(window, X, minval, maxval, props); break;
-            case u16: chart = setup_histogram<ushort >(window, X, minval, maxval, props); break;
-            case u8 : chart = setup_histogram<uchar  >(window, X, minval, maxval, props); break;
-            default:  TYPE_ERROR(1, Xtype);
+        switch (Xtype) {
+            case f32:
+                chart =
+                    setup_histogram<float>(window, X, minval, maxval, props);
+                break;
+            case s32:
+                chart = setup_histogram<int>(window, X, minval, maxval, props);
+                break;
+            case u32:
+                chart = setup_histogram<uint>(window, X, minval, maxval, props);
+                break;
+            case s16:
+                chart =
+                    setup_histogram<short>(window, X, minval, maxval, props);
+                break;
+            case u16:
+                chart =
+                    setup_histogram<ushort>(window, X, minval, maxval, props);
+                break;
+            case u8:
+                chart =
+                    setup_histogram<uchar>(window, X, minval, maxval, props);
+                break;
+            default: TYPE_ERROR(1, Xtype);
         }
+        auto gridDims = forgeManager().getWindowGrid(window);
 
-        // Window's draw function requires either image or chart
-        if (props->col > -1 && props->row > -1)
-            window->draw(props->row, props->col, *chart, props->title);
-        else
-            window->draw(*chart);
+        ForgeModule& _ = forgePlugin();
+        if (props->col > -1 && props->row > -1) {
+            FG_CHECK(_.fg_draw_chart_to_cell(
+                window, gridDims.first, gridDims.second,
+                props->row * gridDims.second + props->col, chart,
+                props->title));
+        } else {
+            FG_CHECK(_.fg_draw_chart(window, chart));
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
-#else
-    AF_RETURN_ERROR("ArrayFire compiled without graphics support", AF_ERR_NO_GFX);
-#endif
 }

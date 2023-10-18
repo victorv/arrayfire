@@ -7,254 +7,110 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <ops.hpp>
-#include <backend.hpp>
 #include <Param.hpp>
-#include <dispatch.hpp>
-#include <math.hpp>
-#include <err_cuda.hpp>
+#include <backend.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
+#include <err_cuda.hpp>
 #include <memory.hpp>
+#include <nvrtc_kernel_headers/scan_first_cuh.hpp>
 #include "config.hpp"
 
-namespace cuda
-{
-namespace kernel
-{
-    template<typename Ti, typename To, af_op_t op, bool isFinalPass, uint DIMX, bool inclusive_scan>
-    __global__
-    static void scan_first_kernel(Param<To> out,
-                                  Param<To> tmp,
-                                  CParam<Ti>  in,
-                                  uint blocks_x,
-                                  uint blocks_y,
-                                  uint lim)
-    {
-        const int tidx = threadIdx.x;
-        const int tidy = threadIdx.y;
+namespace arrayfire {
+namespace cuda {
+namespace kernel {
 
-        const int zid = blockIdx.x / blocks_x;
-        const int wid = blockIdx.y / blocks_y;
-        const int blockIdx_x = blockIdx.x - (blocks_x) * zid;
-        const int blockIdx_y = blockIdx.y - (blocks_y) * wid;
-        const int xid = blockIdx_x * blockDim.x * lim + tidx;
-        const int yid = blockIdx_y * blockDim.y + tidy;
+template<typename Ti, typename To, af_op_t op>
+static void scan_first_launcher(Param<To> out, Param<To> tmp, CParam<Ti> in,
+                                const uint blocks_x, const uint blocks_y,
+                                const uint threads_x, bool isFinalPass,
+                                bool inclusive_scan) {
+    auto scan_first = common::getKernel(
+        "arrayfire::cuda::scan_first", {{scan_first_cuh_src}},
+        TemplateArgs(TemplateTypename<Ti>(), TemplateTypename<To>(),
+                     TemplateArg(op), TemplateArg(isFinalPass),
+                     TemplateArg(threads_x), TemplateArg(inclusive_scan)),
+        {{DefineValue(THREADS_PER_BLOCK)}});
 
-        bool cond_yzw = (yid < out.dims[1]) && (zid < out.dims[2]) && (wid < out.dims[3]);
+    dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
+    dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
 
-        if (!cond_yzw) return; // retire warps early
+    const int maxBlocksY = getDeviceProp(getActiveDeviceId()).maxGridSize[1];
+    blocks.z             = divup(blocks.y, maxBlocksY);
+    blocks.y             = divup(blocks.y, blocks.z);
 
-        const Ti *iptr = in.ptr;
-        To *optr = out.ptr;
-        To *tptr = tmp.ptr;
+    uint lim = divup(out.dims[0], (threads_x * blocks_x));
 
-        iptr += wid *  in.strides[3] + zid *  in.strides[2] + yid *  in.strides[1];
-        optr += wid * out.strides[3] + zid * out.strides[2] + yid * out.strides[1];
-        tptr += wid * tmp.strides[3] + zid * tmp.strides[2] + yid * tmp.strides[1];
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
+    scan_first(qArgs, out, tmp, in, blocks_x, blocks_y, lim);
+    POST_LAUNCH_CHECK();
+}
 
+template<typename To, af_op_t op>
+static void bcast_first_launcher(Param<To> out, CParam<To> tmp,
+                                 const uint blocks_x, const uint blocks_y,
+                                 const uint threads_x, bool inclusive_scan) {
+    auto scan_first_bcast = common::getKernel(
+        "arrayfire::cuda::scan_first_bcast", {{scan_first_cuh_src}},
+        TemplateArgs(TemplateTypename<To>(), TemplateArg(op)));
 
-        const int DIMY = THREADS_PER_BLOCK / DIMX;
-        const int SHARED_MEM_SIZE = (2 * DIMX + 1) * (DIMY);
+    dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
+    dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
 
-        __shared__ To s_val[SHARED_MEM_SIZE];
-        __shared__ To s_tmp[DIMY];
+    const int maxBlocksY = getDeviceProp(getActiveDeviceId()).maxGridSize[1];
+    blocks.z             = divup(blocks.y, maxBlocksY);
+    blocks.y             = divup(blocks.y, blocks.z);
 
-        To *sptr = s_val + tidy * (2 * DIMX + 1);
+    uint lim = divup(out.dims[0], (threads_x * blocks_x));
 
-        Transform<Ti, To, op> transform;
-        Binary<To, op> binop;
+    EnqueueArgs qArgs(blocks, threads, getActiveStream());
+    scan_first_bcast(qArgs, out, tmp, blocks_x, blocks_y, lim, inclusive_scan);
+    POST_LAUNCH_CHECK();
+}
 
-        const To init = binop.init();
-        int id = xid;
-        To val = init;
+template<typename Ti, typename To, af_op_t op>
+static void scan_first(Param<To> out, CParam<Ti> in, bool inclusive_scan) {
+    uint threads_x = nextpow2(std::max(32u, (uint)out.dims[0]));
+    threads_x      = std::min(threads_x, THREADS_PER_BLOCK);
+    uint threads_y = THREADS_PER_BLOCK / threads_x;
 
-        const bool isLast = (tidx == (DIMX - 1));
+    uint blocks_x = divup(out.dims[0], threads_x * REPEAT);
+    uint blocks_y = divup(out.dims[1], threads_y);
 
-        for (int k = 0; k < lim; k++) {
+    if (blocks_x == 1) {
+        scan_first_launcher<Ti, To, op>(out, out, in, blocks_x, blocks_y,
+                                        threads_x, true, inclusive_scan);
 
-            if (isLast) s_tmp[tidy] = val;
+    } else {
+        Param<To> tmp = out;
 
-            bool cond = (id < out.dims[0]);
-            val = cond ? transform(iptr[id]) : init;
-            sptr[tidx] = val;
-            __syncthreads();
+        tmp.dims[0]    = blocks_x;
+        tmp.strides[0] = 1;
+        for (int k = 1; k < 4; k++)
+            tmp.strides[k] = tmp.strides[k - 1] * tmp.dims[k - 1];
 
+        int tmp_elements = tmp.strides[3] * tmp.dims[3];
+        auto tmp_alloc   = memAlloc<To>(tmp_elements);
+        tmp.ptr          = tmp_alloc.get();
 
-            int start = 0;
-#pragma unroll
-            for (int off = 1; off < DIMX; off *= 2) {
+        scan_first_launcher<Ti, To, op>(out, tmp, in, blocks_x, blocks_y,
+                                        threads_x, false, inclusive_scan);
 
-                if (tidx >= off) val = binop(val, sptr[(start - off) + tidx]);
-                start = DIMX - start;
-                sptr[start + tidx] = val;
-
-                __syncthreads();
-            }
-
-            val = binop(val, s_tmp[tidy]);
-
-            if (inclusive_scan) {
-                if (cond) {
-                    optr[id] = val;
-                }
-            } else {
-                if (id == (out.dims[0] - 1)) {
-                    optr[0] = init;
-                } else if (id < (out.dims[0] - 1)) {
-                    optr[id + 1] = val;
-                }
-            }
-            id += blockDim.x;
-            __syncthreads();
-        }
-
-        if (!isFinalPass && isLast) {
-            tptr[blockIdx_x] = val;
-        }
-    }
-
-    template<typename To, af_op_t op>
-    __global__
-    static void bcast_first_kernel(Param<To> out,
-                                   CParam<To> tmp,
-                                   uint blocks_x,
-                                   uint blocks_y,
-                                   uint lim)
-    {
-        const int tidx = threadIdx.x;
-        const int tidy = threadIdx.y;
-
-        const int zid = blockIdx.x / blocks_x;
-        const int wid = blockIdx.y / blocks_y;
-        const int blockIdx_x = blockIdx.x - (blocks_x) * zid;
-        const int blockIdx_y = blockIdx.y - (blocks_y) * wid;
-        const int xid = blockIdx_x * blockDim.x * lim + tidx;
-        const int yid = blockIdx_y * blockDim.y + tidy;
-
-        if (blockIdx_x == 0) return;
-
-        bool cond = (yid < out.dims[1]) && (zid < out.dims[2]) && (wid < out.dims[3]);
-        if (!cond) return;
-
-        To *optr = out.ptr;
-        const To *tptr = tmp.ptr;
-
-        optr += wid * out.strides[3] + zid * out.strides[2] + yid * out.strides[1];
-        tptr += wid * tmp.strides[3] + zid * tmp.strides[2] + yid * tmp.strides[1];
-
-        Binary<To, op> binop;
-        To accum = tptr[blockIdx_x - 1];
-
-        for (int k = 0, id = xid;
-             k < lim && id < out.dims[0];
-             k++, id += blockDim.x) {
-
-            optr[id] = binop(accum, optr[id]);
-        }
-
-    }
-
-    template<typename Ti, typename To, af_op_t op, bool isFinalPass, bool inclusive_scan>
-    static void scan_first_launcher(Param<To> out,
-                             Param<To> tmp,
-                             CParam<Ti> in,
-                             const uint blocks_x,
-                             const uint blocks_y,
-                             const uint threads_x)
-    {
-
-        dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
-        dim3 blocks(blocks_x * out.dims[2],
-                    blocks_y * out.dims[3]);
-
-        uint lim = divup(out.dims[0], (threads_x * blocks_x));
-
-        switch (threads_x) {
-        case 32:
-            CUDA_LAUNCH((scan_first_kernel<Ti, To, op, isFinalPass,  32, inclusive_scan>), blocks, threads,
-                out, tmp, in, blocks_x, blocks_y, lim); break;
-        case 64:
-            CUDA_LAUNCH((scan_first_kernel<Ti, To, op, isFinalPass,  64, inclusive_scan>), blocks, threads,
-                out, tmp, in, blocks_x, blocks_y, lim); break;
-        case 128:
-            CUDA_LAUNCH((scan_first_kernel<Ti, To, op, isFinalPass,  128, inclusive_scan>), blocks, threads,
-                out, tmp, in, blocks_x, blocks_y, lim); break;
-        case 256:
-            CUDA_LAUNCH((scan_first_kernel<Ti, To, op, isFinalPass,  256, inclusive_scan>), blocks, threads,
-                out, tmp, in, blocks_x, blocks_y, lim); break;
-        }
-
-        POST_LAUNCH_CHECK();
-    }
-
-
-
-    template<typename To, af_op_t op>
-    static void bcast_first_launcher(Param<To> out,
-                                     CParam<To> tmp,
-                                     const uint blocks_x,
-                                     const uint blocks_y,
-                                     const uint threads_x)
-    {
-
-        dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
-        dim3 blocks(blocks_x * out.dims[2],
-                    blocks_y * out.dims[3]);
-
-        uint lim = divup(out.dims[0], (threads_x * blocks_x));
-
-        CUDA_LAUNCH((bcast_first_kernel<To, op>), blocks, threads, out, tmp, blocks_x, blocks_y, lim);
-
-        POST_LAUNCH_CHECK();
-    }
-
-    template<typename Ti, typename To, af_op_t op, bool inclusive_scan>
-    static void scan_first(Param<To> out, CParam<Ti> in)
-    {
-        uint threads_x = nextpow2(std::max(32u, (uint)out.dims[0]));
-        threads_x = std::min(threads_x, THREADS_PER_BLOCK);
-        uint threads_y = THREADS_PER_BLOCK / threads_x;
-
-        uint blocks_x = divup(out.dims[0], threads_x * REPEAT);
-        uint blocks_y = divup(out.dims[1], threads_y);
-
-        if (blocks_x == 1) {
-
-            scan_first_launcher<Ti, To, op, true, inclusive_scan>(out, out, in,
-                                                  blocks_x, blocks_y,
-                                                  threads_x);
-
+        // FIXME: Is there an alternative to the if condition ?
+        if (op == af_notzero_t) {
+            scan_first_launcher<To, To, af_add_t>(tmp, tmp, tmp, 1, blocks_y,
+                                                  threads_x, true, true);
         } else {
-
-            Param<To> tmp = out;
-
-            tmp.dims[0] = blocks_x;
-            tmp.strides[0] = 1;
-            for (int k = 1; k < 4; k++) tmp.strides[k] = tmp.strides[k - 1] * tmp.dims[k - 1];
-
-            int tmp_elements = tmp.strides[3] * tmp.dims[3];
-            tmp.ptr = memAlloc<To>(tmp_elements);
-
-            scan_first_launcher<Ti, To, op, false, inclusive_scan>(out, tmp, in,
-                                                   blocks_x, blocks_y,
-                                                   threads_x);
-
-            //FIXME: Is there an alternative to the if condition ?
-            if (op == af_notzero_t) {
-                scan_first_launcher<To, To, af_add_t, true, true>(tmp, tmp, tmp,
-                                                             1, blocks_y,
-                                                             threads_x);
-            } else {
-                scan_first_launcher<To, To,       op, true, true>(tmp, tmp, tmp,
-                                                            1, blocks_y,
-                                                            threads_x);
-            }
-
-            bcast_first_launcher<To, op>(out, tmp, blocks_x, blocks_y, threads_x);
-
-            memFree(tmp.ptr);
+            scan_first_launcher<To, To, op>(tmp, tmp, tmp, 1, blocks_y,
+                                            threads_x, true, true);
         }
-    }
 
+        bcast_first_launcher<To, op>(out, tmp, blocks_x, blocks_y, threads_x,
+                                     inclusive_scan);
+    }
 }
-}
+
+}  // namespace kernel
+}  // namespace cuda
+}  // namespace arrayfire

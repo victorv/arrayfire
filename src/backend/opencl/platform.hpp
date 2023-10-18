@@ -8,136 +8,148 @@
  ********************************************************/
 
 #pragma once
-#if defined(WITH_GRAPHICS)
-#include <fg/window.h>
-#endif
 
-#define CL_HPP_ENABLE_EXCEPTIONS
-#define CL_HPP_MINIMUM_OPENCL_VERSION 120
-#define CL_HPP_TARGET_OPENCL_VERSION 120
+#include <cl2hpp.hpp>
+#include <af/opencl.h>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include <CL/cl2.hpp>
-#pragma GCC diagnostic pop
-
-#include <vector>
+#include <memory>
 #include <string>
 
-namespace opencl
-{
+// Forward declarations
+namespace boost {
+template<typename T>
+class shared_ptr;
 
-class DeviceManager
-{
-    friend std::string getDeviceInfo();
+namespace compute {
+class program_cache;
+}
+}  // namespace boost
 
-    friend int getDeviceCount();
+namespace spdlog {
+class logger;
+}
 
-    friend int getActiveDeviceId();
+namespace arrayfire {
+namespace common {
 
-    friend int getDeviceIdFromNativeId(cl_device_id id);
+class ForgeManager;
 
-    friend const cl::Context& getContext();
+class MemoryManagerBase;
 
-    friend cl::CommandQueue& getQueue();
+class Version;
+}  // namespace common
+}  // namespace arrayfire
 
-    friend const cl::Device& getDevice(int id);
+using arrayfire::common::MemoryManagerBase;
 
-    friend size_t getDeviceMemorySize(int device);
+namespace arrayfire {
+namespace opencl {
 
-    friend bool isGLSharingSupported();
+// Forward declarations
+class GraphicsResourceManager;
+class PlanCache;  // clfft
 
-    friend bool isDoubleSupported(int device);
-
-    friend void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute);
-
-    friend int setDevice(int device);
-
-    friend void addDeviceContext(cl_device_id dev, cl_context cxt, cl_command_queue que);
-
-    friend void setDeviceContext(cl_device_id dev, cl_context cxt);
-
-    friend void removeDeviceContext(cl_device_id dev, cl_context ctx);
-
-    friend int getActiveDeviceType();
-    friend int getActivePlatform();
-
-    public:
-        static const unsigned MAX_DEVICES = 32;
-
-        static DeviceManager& getInstance();
-
-        ~DeviceManager();
-
-    protected:
-        void setContext(int device);
-
-        DeviceManager();
-
-        // Following two declarations are required to
-        // avoid copying accidental copy/assignment
-        // of instance returned by getInstance to other
-        // variables
-        DeviceManager(DeviceManager const&);
-        void operator=(DeviceManager const&);
-#if defined(WITH_GRAPHICS)
-        void markDeviceForInterop(const int device, const forge::Window* wHandle);
-#endif
-
-    private:
-        // Attributes
-        std::vector<cl::Device*>       mDevices;
-        std::vector<cl::Context*>     mContexts;
-        std::vector<cl::CommandQueue*>  mQueues;
-        std::vector<bool>        mIsGLSharingOn;
-        std::vector<int>         mDeviceTypes;
-        std::vector<int>         mPlatforms;
-        unsigned mUserDeviceOffset;
-
-        unsigned mActiveCtxId;
-        unsigned mActiveQId;
-};
+bool verify_present(const std::string& pname, const std::string ref);
 
 int getBackend();
 
-std::string getDeviceInfo();
+std::string getDeviceInfo() noexcept;
 
-int getDeviceCount();
+int getDeviceCount() noexcept;
+
+void init();
 
 int getActiveDeviceId();
 
-unsigned getMaxJitSize();
+int& getMaxJitSize();
 
 const cl::Context& getContext();
 
-cl::CommandQueue& getQueue();
+cl::CommandQueue& getQueue(int device_id = -1);
+
+/// Return a cl_command_queue handle to the queue for the device.
+///
+/// \param[in] device The device of the returned queue
+/// \returns The cl_command_queue handle to the queue
+cl_command_queue getQueueHandle(int device_id);
 
 const cl::Device& getDevice(int id = -1);
+
+const std::string& getActiveDeviceBaseBuildFlags();
+
+/// Returns the set of all OpenCL C Versions the device supports. The values
+/// are sorted from oldest to latest.
+std::vector<common::Version> getOpenCLCDeviceVersion(const cl::Device& device);
 
 size_t getDeviceMemorySize(int device);
 
 size_t getHostMemorySize();
 
-cl_device_type getDeviceType();
+inline unsigned getMemoryBusWidth(const cl::Device& device) {
+    return device.getInfo<CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE>();
+}
 
-bool isHostUnifiedMemory(const cl::Device &device);
+// OCL only reports on L1 cache, so we have to estimate the L2 Cache
+// size. From studying many GPU cards, it is noticed that their is a
+// direct correlation between Cache line and L2 Cache size:
+//      - 16KB L2 Cache for each bit in Cache line.
+//        Example: RTX3070 (4096KB of L2 Cache, 256Bit of Cache
+//        line)
+//                   --> 256*16KB = 4096KB
+//      - This is also valid for all AMD GPU's
+//      - Exceptions
+//          * GTX10XX series have 8KB per bit of cache line
+//          * iGPU (64bit cacheline) have 5KB per bit of cache line
+inline size_t getL2CacheSize(const cl::Device& device) {
+    const unsigned cacheLine{getMemoryBusWidth(device)};
+    return cacheLine * 1024ULL *
+           (cacheLine == 64 ? 5
+            : device.getInfo<CL_DEVICE_NAME>().find("GTX 10") ==
+                    std::string::npos
+                ? 16
+                : 8);
+}
+
+inline unsigned getComputeUnits(const cl::Device& device) {
+    return device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
+}
+
+// maximum nr of threads the device really can run in parallel, without
+// scheduling
+inline unsigned getMaxParallelThreads(const cl::Device& device) {
+    return getComputeUnits(device) * 2048;
+}
+
+cl_device_type getDeviceType();
 
 bool OpenCLCPUOffload(bool forceOffloadOSX = true);
 
 bool isGLSharingSupported();
 
-bool isDoubleSupported(int device);
+bool isDoubleSupported(unsigned device);
+inline bool isDoubleSupported(const cl::Device& device) {
+    // 64bit fp is an optional extension
+    return (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_fp64") !=
+            std::string::npos);
+}
 
-void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute);
+// Returns true if 16-bit precision floats are supported by the device
+bool isHalfSupported(unsigned device);
+inline bool isHalfSupported(const cl::Device& device) {
+    // 16bit fp is an option extension
+    return (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_fp16") !=
+            std::string::npos);
+}
 
-std::string getPlatformName(const cl::Device &device);
+void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute);
+
+std::string getPlatformName(const cl::Device& device);
 
 int setDevice(int device);
 
-void addDeviceContext(cl_device_id dev, cl_context cxt, cl_command_queue que);
+void addDeviceContext(cl_device_id dev, cl_context ctx, cl_command_queue que);
 
-void setDeviceContext(cl_device_id dev, cl_context cxt);
+void setDeviceContext(cl_device_id dev, cl_context ctx);
 
 void removeDeviceContext(cl_device_id dev, cl_context ctx);
 
@@ -146,8 +158,41 @@ void sync(int device);
 bool synchronize_calls();
 
 int getActiveDeviceType();
-int getActivePlatform();
+
+cl::Platform& getActivePlatform();
+
+afcl::platform getActivePlatformVendor();
 
 bool& evalFlag();
 
-}
+MemoryManagerBase& memoryManager();
+
+void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManager();
+
+MemoryManagerBase& pinnedMemoryManager();
+
+void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManagerPinned();
+
+arrayfire::common::ForgeManager& forgeManager();
+
+GraphicsResourceManager& interopManager();
+
+PlanCache& fftManager();
+
+afcl::platform getPlatformEnum(cl::Device dev);
+
+void setActiveContext(int device);
+
+/// Returns true if the buffer on device buf_device_id can be accessed by
+/// kernels on device execution_id
+///
+/// \param[in] buf_device_id The device id of the buffer
+/// \param[in] execution_id The device where the buffer will be accessed.
+bool isDeviceBufferAccessible(int buf_device_id, int execution_id);
+
+}  // namespace opencl
+}  // namespace arrayfire

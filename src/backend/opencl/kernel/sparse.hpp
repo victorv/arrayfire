@@ -8,256 +8,224 @@
  ********************************************************/
 
 #pragma once
+
+#include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
+#include <debug_opencl.hpp>
+#include <kernel/config.hpp>
+#include <kernel/reduce.hpp>
+#include <kernel/scan_dim.hpp>
+#include <kernel/scan_first.hpp>
+#include <kernel/sort_by_key.hpp>
 #include <kernel_headers/coo2dense.hpp>
+#include <kernel_headers/csr2coo.hpp>
 #include <kernel_headers/csr2dense.hpp>
 #include <kernel_headers/dense2csr.hpp>
-#include <program.hpp>
 #include <traits.hpp>
+
 #include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
-#include <Param.hpp>
-#include <debug_opencl.hpp>
-#include <cache.hpp>
-#include <type_util.hpp>
-#include "scan_dim.hpp"
-#include "reduce.hpp"
-#include "scan_first.hpp"
-#include "config.hpp"
+#include <vector>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
+template<typename T>
+void coo2dense(Param out, const Param values, const Param rowIdx,
+               const Param colIdx) {
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+        TemplateArg(REPEAT),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(resp, REPEAT),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
 
-namespace opencl
-{
-    namespace kernel
-    {
-        template<typename T>
-        void coo2dense(Param out, const Param values, const Param rowIdx, const Param colIdx)
-        {
-            try {
+    auto coo2dense = common::getKernel("coo2Dense", {{coo2dense_cl_src}},
+                                       tmpltArgs, compileOpts);
 
-                std::string ref_name =
-                    std::string("coo2dense_") +
-                    std::string(dtype_traits<T>::getName()) +
-                    std::string("_") +
-                    std::to_string(REPEAT);
+    cl::NDRange local(THREADS_PER_GROUP, 1, 1);
 
-                int device = getActiveDeviceId();
-                auto idx = kernelCaches[device].find(ref_name);
-                kc_entry_t entry;
+    cl::NDRange global(
+        divup(out.info.dims[0], local[0] * REPEAT) * THREADS_PER_GROUP, 1, 1);
 
-                if (idx == kernelCaches[device].end()) {
-                    std::ostringstream options;
-                    options << " -D T="        << dtype_traits<T>::getName()
-                            << " -D reps="     << REPEAT
-                            ;
-
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-
-                    Program prog;
-                    buildProgram(prog, coo2dense_cl, coo2dense_cl_len, options.str());
-                    entry.prog   = new Program(prog);
-                    entry.ker = new Kernel(*entry.prog, "coo2dense_kernel");
-                } else {
-                    entry = idx->second;
-                };
-
-                auto coo2denseOp = KernelFunctor<Buffer, const KParam,
-                                           const Buffer, const KParam,
-                                           const Buffer, const KParam,
-                                           const Buffer, const KParam>
-                                          (*entry.ker);
-
-                NDRange local(THREADS_PER_GROUP, 1, 1);
-
-                NDRange global(divup(out.info.dims[0], local[0] * REPEAT) * THREADS_PER_GROUP, 1, 1);
-
-                coo2denseOp(EnqueueArgs(getQueue(), global, local),
-                       *out.data, out.info,
-                       *values.data, values.info,
-                       *rowIdx.data, rowIdx.info,
-                       *colIdx.data, colIdx.info);
-
-                CL_DEBUG_FINISH(getQueue());
-            } catch (cl::Error err) {
-                CL_TO_AF_ERROR(err);
-            }
-        }
-
-        template<typename T>
-        void csr2dense(Param output, const Param values, const Param rowIdx, const Param colIdx)
-        {
-            try {
-                const int MAX_GROUPS = 4096;
-                int M = rowIdx.info.dims[0] - 1;
-                //FIXME: This needs to be based non nonzeros per row
-                int threads = 64;
-
-                std::string ref_name =
-                    std::string("csr2dense_") +
-                    std::string(dtype_traits<T>::getName()) +
-                    std::string("_") +
-                    std::to_string(threads);
-
-                int device = getActiveDeviceId();
-                auto idx = kernelCaches[device].find(ref_name);
-                kc_entry_t entry;
-
-                if (idx == kernelCaches[device].end()) {
-
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    options << " -D THREADS=" << threads;
-
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-
-                    const char *ker_strs[] = {csr2dense_cl};
-                    const int   ker_lens[] = {csr2dense_cl_len};
-
-                    Program prog;
-                    buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-                    entry.prog = new Program(prog);
-                    entry.ker  = new Kernel(*entry.prog, "csr2dense");
-                } else {
-                    entry = idx->second;
-                }
-
-                NDRange local(threads, 1);
-                int groups_x = std::min((int)(divup(M, local[0])), MAX_GROUPS);
-                NDRange global(local[0] * groups_x, 1);
-                auto csr2dense_kernel = *entry.ker;
-                auto csr2dense_func = KernelFunctor<Buffer,
-                                                    Buffer, Buffer, Buffer,
-                                                    int> (csr2dense_kernel);
-
-                csr2dense_func(EnqueueArgs(getQueue(), global, local),
-                               *output.data, *values.data, *rowIdx.data, *colIdx.data, M);
-
-                CL_DEBUG_FINISH(getQueue());
-
-            } catch(cl::Error err) {
-                CL_TO_AF_ERROR(err);
-            }
-        }
-
-        template<typename T>
-        void dense2csr(Param values, Param rowIdx, Param colIdx, const Param dense)
-        {
-            try {
-                int num_rows = dense.info.dims[0];
-                int num_cols = dense.info.dims[1];
-                int dense_elements = num_rows * num_cols;
-                Param sd1, rd1, sd0;
-                // sd1 contains output of scan along dim 1 of dense
-                sd1.data = bufferAlloc(dense_elements * sizeof(int));
-                // rd1 contains output of nonzero count along dim 1 along dense
-                rd1.data = bufferAlloc(num_rows * sizeof(int));
-                // sd0 contains output of exclusive scan rd1
-                sd0 = rowIdx;
-
-                sd1.info.offset = 0;
-                rd1.info.offset = 0;
-
-                sd1.info.dims[0] = num_rows;
-                rd1.info.dims[0] = num_rows;
-
-                sd1.info.dims[1] = num_cols;
-                rd1.info.dims[1] = 1;
-
-                sd1.info.dims[2] = 1;
-                rd1.info.dims[2] = 1;
-
-                sd1.info.dims[3] = 1;
-                rd1.info.dims[3] = 1;
-
-                sd1.info.strides[0] = 1;
-                rd1.info.strides[0] = 1;
-                for (int i = 1; i < 4; i++) {
-                    sd1.info.strides[i] = sd1.info.dims[i - 1] * sd1.info.strides[i - 1];
-                    rd1.info.strides[i] = rd1.info.dims[i - 1] * rd1.info.strides[i - 1];
-                }
-
-                scan_dim<T, int, af_notzero_t, true>(sd1, dense, 1);
-                reduce_dim<T, int, af_notzero_t>(rd1, dense, 0, 0, 1);
-                scan_first<int, int, af_add_t, false>(sd0, rd1);
-
-                int nnz = values.info.dims[0];
-                getQueue().enqueueWriteBuffer(*sd0.data, CL_TRUE,
-                                              sd0.info.offset + (rowIdx.info.dims[0] - 1) * sizeof(int),
-                                              sizeof(int),
-                                              (void *)&nnz);
-
-                std::string ref_name =
-                    std::string("dense2csr_") +
-                    std::string(dtype_traits<T>::getName());
-
-                int device = getActiveDeviceId();
-                auto idx = kernelCaches[device].find(ref_name);
-                kc_entry_t entry;
-
-                if (idx == kernelCaches[device].end()) {
-
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    if (std::is_same<T, cfloat>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D IS_CPLX=1";
-                    } else {
-                        options << " -D IS_CPLX=0";
-                    }
-
-                    const char *ker_strs[] = {dense2csr_cl};
-                    const int   ker_lens[] = {dense2csr_cl_len};
-
-                    Program prog;
-                    buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-                    entry.prog = new Program(prog);
-                    entry.ker  = new Kernel(*entry.prog, "dense2csr_split_kernel");
-
-                    kernelCaches[device][ref_name] = entry;
-                } else {
-                    entry = idx->second;
-                }
-
-                NDRange local(THREADS_X, THREADS_Y);
-                int groups_x = divup(dense.info.dims[0], local[0]);
-                int groups_y = divup(dense.info.dims[1], local[1]);
-                NDRange global(groups_x * local[0], groups_y * local[1]);
-                auto dense2csr_split = KernelFunctor<Buffer, Buffer,
-                                                     Buffer, KParam,
-                                                     Buffer, KParam,
-                                                     Buffer>(*entry.ker);
-
-                dense2csr_split(EnqueueArgs(getQueue(), global, local),
-                                *values.data, *colIdx.data,
-                                *dense.data, dense.info,
-                                *sd1.data, sd1.info,
-                                *sd0.data);
-
-                CL_DEBUG_FINISH(getQueue());
-
-                bufferFree(rd1.data);
-                bufferFree(sd1.data);
-            } catch (cl::Error &err) {
-                CL_TO_AF_ERROR(err);
-            }
-        }
-    }
+    coo2dense(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+              *values.data, values.info, *rowIdx.data, rowIdx.info,
+              *colIdx.data, colIdx.info);
+    CL_DEBUG_FINISH(getQueue());
 }
+
+template<typename T>
+void csr2dense(Param output, const Param values, const Param rowIdx,
+               const Param colIdx) {
+    constexpr int MAX_GROUPS = 4096;
+    // FIXME: This needs to be based non nonzeros per row
+    constexpr int threads = 64;
+
+    const int M = rowIdx.info.dims[0] - 1;
+
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+        TemplateArg(threads),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(THREADS, threads),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
+
+    auto csr2dense = common::getKernel("csr2Dense", {{csr2dense_cl_src}},
+                                       tmpltArgs, compileOpts);
+
+    cl::NDRange local(threads, 1);
+    int groups_x = std::min((int)(divup(M, local[0])), MAX_GROUPS);
+    cl::NDRange global(local[0] * groups_x, 1);
+
+    csr2dense(cl::EnqueueArgs(getQueue(), global, local), *output.data,
+              *values.data, *rowIdx.data, *colIdx.data, M);
+    CL_DEBUG_FINISH(getQueue());
+}
+
+template<typename T>
+void dense2csr(Param values, Param rowIdx, Param colIdx, const Param dense) {
+    constexpr bool IsComplex =
+        std::is_same<T, cfloat>::value || std::is_same<T, cdouble>::value;
+
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(IS_CPLX, (IsComplex ? 1 : 0)),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
+
+    auto dense2Csr = common::getKernel("dense2Csr", {{dense2csr_cl_src}},
+                                       tmpltArgs, compileOpts);
+
+    int num_rows = dense.info.dims[0];
+    int num_cols = dense.info.dims[1];
+
+    // sd1 contains output of scan along dim 1 of dense
+    Array<int> sd1 = createEmptyArray<int>(dim4(num_rows, num_cols));
+    // rd1 contains output of nonzero count along dim 1 along dense
+    Array<int> rd1 = createEmptyArray<int>(num_rows);
+
+    scanDim<T, int, af_notzero_t>(sd1, dense, 1, true);
+    reduceDim<T, int, af_notzero_t>(rd1, dense, 0, 0, 1);
+    scanFirst<int, int, af_add_t>(rowIdx, rd1, false);
+
+    int nnz = values.info.dims[0];
+    getQueue().enqueueFillBuffer(
+        *rowIdx.data, nnz,
+        rowIdx.info.offset + (rowIdx.info.dims[0] - 1) * sizeof(int),
+        sizeof(int));
+
+    cl::NDRange local(THREADS_X, THREADS_Y);
+    int groups_x = divup(dense.info.dims[0], local[0]);
+    int groups_y = divup(dense.info.dims[1], local[1]);
+    cl::NDRange global(groups_x * local[0], groups_y * local[1]);
+
+    const Param sdParam = sd1;
+
+    dense2Csr(cl::EnqueueArgs(getQueue(), global, local), *values.data,
+              *colIdx.data, *dense.data, dense.info, *sdParam.data,
+              sdParam.info, *rowIdx.data);
+    CL_DEBUG_FINISH(getQueue());
+}
+
+template<typename T>
+void swapIndex(Param ovalues, Param oindex, const Param ivalues,
+               const cl::Buffer *iindex, const Param swapIdx) {
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
+
+    auto swapIndex = common::getKernel("swapIndex", {{csr2coo_cl_src}},
+                                       tmpltArgs, compileOpts);
+
+    cl::NDRange global(ovalues.info.dims[0], 1, 1);
+
+    swapIndex(cl::EnqueueArgs(getQueue(), global), *ovalues.data, *oindex.data,
+              *ivalues.data, *iindex, *swapIdx.data,
+              static_cast<int>(ovalues.info.dims[0]));
+    CL_DEBUG_FINISH(getQueue());
+}
+
+template<typename T>
+void csr2coo(Param ovalues, Param orowIdx, Param ocolIdx, const Param ivalues,
+             const Param irowIdx, const Param icolIdx, Param index) {
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
+
+    auto csr2coo = common::getKernel("csr2Coo", {{csr2coo_cl_src}}, tmpltArgs,
+                                     compileOpts);
+
+    const int MAX_GROUPS = 4096;
+    int M                = irowIdx.info.dims[0] - 1;
+    // FIXME: This needs to be based non nonzeros per row
+    int threads = 64;
+
+    cl::Buffer *scratch = bufferAlloc(orowIdx.info.dims[0] * sizeof(int));
+
+    cl::NDRange local(threads, 1);
+    int groups_x = std::min((int)(divup(M, local[0])), MAX_GROUPS);
+    cl::NDRange global(local[0] * groups_x, 1);
+
+    csr2coo(cl::EnqueueArgs(getQueue(), global, local), *scratch, *ocolIdx.data,
+            *irowIdx.data, *icolIdx.data, M);
+
+    // Now we need to sort this into column major
+    kernel::sort0ByKeyIterative<int, int>(ocolIdx, index, true);
+
+    // Now use index to sort values and rows
+    kernel::swapIndex<T>(ovalues, orowIdx, ivalues, scratch, index);
+
+    CL_DEBUG_FINISH(getQueue());
+
+    bufferFree(scratch);
+}
+
+template<typename T>
+void coo2csr(Param ovalues, Param orowIdx, Param ocolIdx, const Param ivalues,
+             const Param irowIdx, const Param icolIdx, Param index,
+             Param rowCopy, const int M) {
+    std::vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+    };
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
+
+    auto csrReduce = common::getKernel("csrReduce", {{csr2coo_cl_src}},
+                                       tmpltArgs, compileOpts);
+
+    // Now we need to sort this into column major
+    kernel::sort0ByKeyIterative<int, int>(rowCopy, index, true);
+
+    // Now use index to sort values and rows
+    kernel::swapIndex<T>(ovalues, ocolIdx, ivalues, icolIdx.data, index);
+
+    CL_DEBUG_FINISH(getQueue());
+
+    cl::NDRange global(irowIdx.info.dims[0], 1, 1);
+
+    csrReduce(cl::EnqueueArgs(getQueue(), global), *orowIdx.data, *rowCopy.data,
+              M, static_cast<int>(ovalues.info.dims[0]));
+    CL_DEBUG_FINISH(getQueue());
+}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

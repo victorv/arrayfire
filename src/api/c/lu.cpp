@@ -7,24 +7,27 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/array.h>
-#include <af/lapack.h>
-#include <af/defines.h>
-#include <err_common.hpp>
-#include <handle.hpp>
 #include <backend.hpp>
-#include <ArrayInfo.hpp>
+#include <common/ArrayInfo.hpp>
+#include <common/err_common.hpp>
+#include <handle.hpp>
 #include <lu.hpp>
+#include <af/array.h>
+#include <af/defines.h>
+#include <af/lapack.h>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::isLAPACKAvailable;
 
 template<typename T>
 static inline void lu(af_array *lower, af_array *upper, af_array *pivot,
-                      const af_array in)
-{
-    Array<T> lowerArray = createEmptyArray<T>(af::dim4());
-    Array<T> upperArray = createEmptyArray<T>(af::dim4());
+                      const af_array in) {
+    Array<T> lowerArray   = createEmptyArray<T>(af::dim4());
+    Array<T> upperArray   = createEmptyArray<T>(af::dim4());
     Array<int> pivotArray = createEmptyArray<int>(af::dim4());
 
     lu<T>(lowerArray, upperArray, pivotArray, getArray<T>(in));
@@ -35,15 +38,14 @@ static inline void lu(af_array *lower, af_array *upper, af_array *pivot,
 }
 
 template<typename T>
-static inline af_array lu_inplace(af_array in, bool is_lapack_piv)
-{
-    return getHandle(lu_inplace<T>(getWritableArray<T>(in), !is_lapack_piv));
+static inline af_array lu_inplace(af_array in, bool is_lapack_piv) {
+    return getHandle(lu_inplace<T>(getArray<T>(in), !is_lapack_piv));
 }
 
-af_err af_lu(af_array *lower, af_array *upper, af_array *pivot, const af_array in)
-{
+af_err af_lu(af_array *lower, af_array *upper, af_array *pivot,
+             const af_array in) {
     try {
-        ArrayInfo i_info = getInfo(in);
+        const ArrayInfo &i_info = getInfo(in);
 
         if (i_info.ndims() > 2) {
             AF_ERROR("lu can not be used in batch mode", AF_ERR_BATCH);
@@ -51,22 +53,24 @@ af_err af_lu(af_array *lower, af_array *upper, af_array *pivot, const af_array i
 
         af_dtype type = i_info.getType();
 
-        ARG_ASSERT(3, i_info.isFloating());                       // Only floating and complex types
+        ARG_ASSERT(0, lower != nullptr);
+        ARG_ASSERT(1, upper != nullptr);
+        ARG_ASSERT(2, pivot != nullptr);
+        ARG_ASSERT(3, i_info.isFloating());  // Only floating and complex types
 
-        if(i_info.ndims() == 0) {
-            dim_t my_dims[] = {0, 0, 0, 0};
-            AF_CHECK(af_create_handle(lower, AF_MAX_DIMS, my_dims, type));
-            AF_CHECK(af_create_handle(upper, AF_MAX_DIMS, my_dims, type));
-            AF_CHECK(af_create_handle(pivot, AF_MAX_DIMS, my_dims, type));
+        if (i_info.ndims() == 0) {
+            AF_CHECK(af_create_handle(lower, 0, nullptr, type));
+            AF_CHECK(af_create_handle(upper, 0, nullptr, type));
+            AF_CHECK(af_create_handle(pivot, 0, nullptr, type));
             return AF_SUCCESS;
         }
 
-        switch(type) {
-            case f32: lu<float  >(lower, upper, pivot, in);  break;
-            case f64: lu<double >(lower, upper, pivot, in);  break;
-            case c32: lu<cfloat >(lower, upper, pivot, in);  break;
-            case c64: lu<cdouble>(lower, upper, pivot, in);  break;
-            default:  TYPE_ERROR(1, type);
+        switch (type) {
+            case f32: lu<float>(lower, upper, pivot, in); break;
+            case f64: lu<double>(lower, upper, pivot, in); break;
+            case c32: lu<cfloat>(lower, upper, pivot, in); break;
+            case c64: lu<cdouble>(lower, upper, pivot, in); break;
+            default: TYPE_ERROR(1, type);
         }
     }
     CATCHALL;
@@ -74,43 +78,38 @@ af_err af_lu(af_array *lower, af_array *upper, af_array *pivot, const af_array i
     return AF_SUCCESS;
 }
 
-af_err af_lu_inplace(af_array *pivot, af_array in, const bool is_lapack_piv)
-{
+af_err af_lu_inplace(af_array *pivot, af_array in, const bool is_lapack_piv) {
     try {
-
-        ArrayInfo i_info = getInfo(in);
-        af_dtype type = i_info.getType();
+        const ArrayInfo &i_info = getInfo(in);
+        af_dtype type           = i_info.getType();
 
         if (i_info.ndims() > 2) {
             AF_ERROR("lu can not be used in batch mode", AF_ERR_BATCH);
         }
 
-        ARG_ASSERT(1, i_info.isFloating()); // Only floating and complex types
+        ARG_ASSERT(1, i_info.isFloating());  // Only floating and complex types
+        ARG_ASSERT(0, pivot != nullptr);
 
-        if(i_info.ndims() == 0) {
-            dim_t my_dims[] = {0, 0, 0, 0};
-            return af_create_handle(pivot, AF_MAX_DIMS, my_dims, type);
+        if (i_info.ndims() == 0) {
+            return af_create_handle(pivot, 0, nullptr, type);
         }
 
         af_array out;
-
-        switch(type) {
-            case f32: out = lu_inplace<float  >(in, is_lapack_piv);  break;
-            case f64: out = lu_inplace<double >(in, is_lapack_piv);  break;
-            case c32: out = lu_inplace<cfloat >(in, is_lapack_piv);  break;
-            case c64: out = lu_inplace<cdouble>(in, is_lapack_piv);  break;
-            default:  TYPE_ERROR(1, type);
+        switch (type) {
+            case f32: out = lu_inplace<float>(in, is_lapack_piv); break;
+            case f64: out = lu_inplace<double>(in, is_lapack_piv); break;
+            case c32: out = lu_inplace<cfloat>(in, is_lapack_piv); break;
+            case c64: out = lu_inplace<cdouble>(in, is_lapack_piv); break;
+            default: TYPE_ERROR(1, type);
         }
-        if(pivot != NULL)
-            std::swap(*pivot, out);
+        std::swap(*pivot, out);
     }
     CATCHALL;
 
     return AF_SUCCESS;
 }
 
-af_err af_is_lapack_available(bool *out)
-{
+af_err af_is_lapack_available(bool *out) {
     try {
         *out = isLAPACKAvailable();
     }

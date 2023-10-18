@@ -9,15 +9,12 @@
 
 #include <kernel/convolve/conv2_impl.hpp>
 
-namespace opencl
-{
-
-namespace kernel
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
 INSTANTIATE(char, float)
 
-}
-
-}
-
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

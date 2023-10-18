@@ -9,11 +9,12 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T>
-    Array<T> cholesky(int *info, const Array<T> &in, const bool is_upper);
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+Array<T> cholesky(int *info, const Array<T> &in, const bool is_upper);
 
-    template<typename T>
-    int cholesky_inplace(Array<T> &in, const bool is_upper);
-}
+template<typename T>
+int cholesky_inplace(Array<T> &in, const bool is_upper);
+}  // namespace cuda
+}  // namespace arrayfire

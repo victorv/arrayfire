@@ -9,233 +9,254 @@
 
 #include <af/random.h>
 
+#include <backend.hpp>
+#include <common/MersenneTwister.hpp>
+#include <common/err_common.hpp>
+#include <common/half.hpp>
+#include <handle.hpp>
+#include <random_engine.hpp>
+#include <types.hpp>
 #include <af/array.h>
 #include <af/data.h>
 #include <af/defines.h>
+#include <af/device.h>
 #include <af/dim4.hpp>
-#include <backend.hpp>
-#include <err_common.hpp>
-#include <handle.hpp>
-#include <random_engine.hpp>
-#include <MersenneTwister.hpp>
-#include <types.hpp>
+#include <map>
 #include <memory>
 
-using namespace detail;
-using namespace common;
+using af::dim4;
+using arrayfire::common::half;
+using arrayfire::common::mask;
+using arrayfire::common::MaxBlocks;
+using arrayfire::common::MtStateLength;
+using arrayfire::common::pos;
+using arrayfire::common::recursion_tbl;
+using arrayfire::common::sh1;
+using arrayfire::common::sh2;
+using arrayfire::common::TableLength;
+using arrayfire::common::temper_tbl;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::createHostDataArray;
+using detail::intl;
+using detail::normalDistribution;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::uniformDistribution;
+using detail::ushort;
 
-class RandomEngine
-{
-    public :
-    af_random_engine_type type;
-    std::shared_ptr<uintl> seed;
-    std::shared_ptr<uintl> counter;
-    af_array pos;
-    af_array sh1;
-    af_array sh2;
-    uint mask;
-    af_array recursion_table;
-    af_array temper_table;
-    af_array state;
+Array<uint> emptyArray() { return createEmptyArray<uint>(dim4(0)); }
 
-    RandomEngine(void) : type(AF_RANDOM_ENGINE_DEFAULT), seed(new uintl), counter(new uintl) {
-        *seed = 0;
-        *counter = 0;
-    }
+struct RandomEngine {
+    // clang-format off
+    af_random_engine_type type{AF_RANDOM_ENGINE_DEFAULT}; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::shared_ptr<uintl> seed;                          // NOLINT(misc-non-private-member-variables-in-classes)
+    std::shared_ptr<uintl> counter;                       // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> pos;                                      // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> sh1;                                      // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> sh2;                                      // NOLINT(misc-non-private-member-variables-in-classes)
+    uint mask{0};                                         // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> recursion_table;                          // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> temper_table;                             // NOLINT(misc-non-private-member-variables-in-classes)
+    Array<uint> state;                                    // NOLINT(misc-non-private-member-variables-in-classes)
+    // clang-format on
+
+    RandomEngine()
+        : seed(new uintl())
+        , counter(new uintl())
+        , pos(emptyArray())
+        , sh1(emptyArray())
+        , sh2(emptyArray())
+        , recursion_table(emptyArray())
+        , temper_table(emptyArray())
+        , state(emptyArray()) {}
 };
 
-af_random_engine getRandomEngineHandle(const RandomEngine engine)
-{
-    RandomEngine *engineHandle = new RandomEngine;
-    *engineHandle = engine;
+af_random_engine getRandomEngineHandle(const RandomEngine &engine) {
+    auto *engineHandle = new RandomEngine;
+    *engineHandle      = engine;
     return static_cast<af_random_engine>(engineHandle);
 }
 
-RandomEngine* getRandomEngine(const af_random_engine engineHandle)
-{
+RandomEngine *getRandomEngine(const af_random_engine engineHandle) {
     if (engineHandle == 0) {
         AF_ERROR("Uninitialized random engine", AF_ERR_ARG);
     }
-    return (RandomEngine *)engineHandle;
+    return static_cast<RandomEngine *>(engineHandle);
 }
 
+namespace {
 template<typename T>
-static inline af_array uniformDistribution_(const af::dim4 &dims, RandomEngine *e)
-{
+inline af_array uniformDistribution_(const dim4 &dims, RandomEngine *e) {
     if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-        return getHandle(uniformDistribution<T>(dims,
-                    getArray<uint>(e->pos),
-                    getArray<uint>(e->sh1),
-                    getArray<uint>(e->sh2),
-                    e->mask,
-                    getArray<uint>(e->recursion_table),
-                    getArray<uint>(e->temper_table),
-                    getArray<uint>(e->state)));
+        return getHandle(uniformDistribution<T>(dims, e->pos, e->sh1, e->sh2,
+                                                e->mask, e->recursion_table,
+                                                e->temper_table, e->state));
     } else {
-        return getHandle(uniformDistribution<T>(dims, e->type, *(e->seed), *(e->counter)));
+        return getHandle(
+            uniformDistribution<T>(dims, e->type, *(e->seed), *(e->counter)));
     }
 }
 
 template<typename T>
-static inline af_array normalDistribution_(const af::dim4 &dims, RandomEngine *e)
-{
+inline af_array normalDistribution_(const dim4 &dims, RandomEngine *e) {
     if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-        return getHandle(normalDistribution<T>(dims,
-                    getArray<uint>(e->pos),
-                    getArray<uint>(e->sh1),
-                    getArray<uint>(e->sh2),
-                    e->mask,
-                    getArray<uint>(e->recursion_table),
-                    getArray<uint>(e->temper_table),
-                    getArray<uint>(e->state)));
+        return getHandle(normalDistribution<T>(dims, e->pos, e->sh1, e->sh2,
+                                               e->mask, e->recursion_table,
+                                               e->temper_table, e->state));
     } else {
-        return getHandle(normalDistribution<T>(dims, e->type, *(e->seed), *(e->counter)));
+        return getHandle(
+            normalDistribution<T>(dims, e->type, *(e->seed), *(e->counter)));
     }
 }
 
-static void validateRandomType(const af_random_engine_type type)
-{
-    if ((type != AF_RANDOM_ENGINE_PHILOX_4X32_10)
-    &&  (type != AF_RANDOM_ENGINE_THREEFRY_2X32_16)
-    &&  (type != AF_RANDOM_ENGINE_MERSENNE_GP11213)
-    &&  (type != AF_RANDOM_ENGINE_PHILOX)
-    &&  (type != AF_RANDOM_ENGINE_THREEFRY)
-    &&  (type != AF_RANDOM_ENGINE_MERSENNE)
-    &&  (type != AF_RANDOM_ENGINE_DEFAULT)) {
+void validateRandomType(const af_random_engine_type type) {
+    if ((type != AF_RANDOM_ENGINE_PHILOX_4X32_10) &&
+        (type != AF_RANDOM_ENGINE_THREEFRY_2X32_16) &&
+        (type != AF_RANDOM_ENGINE_MERSENNE_GP11213) &&
+        (type != AF_RANDOM_ENGINE_PHILOX) &&
+        (type != AF_RANDOM_ENGINE_THREEFRY) &&
+        (type != AF_RANDOM_ENGINE_MERSENNE) &&
+        (type != AF_RANDOM_ENGINE_DEFAULT)) {
         AF_ERROR("Invalid random type", AF_ERR_ARG);
     }
 }
+}  // namespace
 
-af_err af_get_default_random_engine(af_random_engine *r)
-{
-    static RandomEngine re;
-    *r = static_cast<af_random_engine> (&re);
-    return AF_SUCCESS;
+af_err af_get_default_random_engine(af_random_engine *r) {
+    try {
+        AF_CHECK(af_init());
+
+        // RandomEngine contains device buffers which are dependent on
+        // context|stream/device. Since nor context or stream are available at
+        // this level, we will only use the deviceId.
+        thread_local std::map<int /*deviceId*/, RandomEngine *>
+            cachedDefaultRandomEngines;
+        const int dependent = af::getDevice();
+        auto it             = cachedDefaultRandomEngines.find(dependent);
+        if (it == cachedDefaultRandomEngines.end()) {
+            RandomEngine *defaultRandomEngine     = new RandomEngine;
+            cachedDefaultRandomEngines[dependent] = defaultRandomEngine;
+            *r = static_cast<af_random_engine>(defaultRandomEngine);
+        } else {
+            *r = static_cast<af_random_engine>(it->second);
+        }
+        return AF_SUCCESS;
+    }
+    CATCHALL;
 }
 
-af_err af_create_random_engine(af_random_engine *engineHandle, af_random_engine_type rtype, uintl seed)
-{
+af_err af_create_random_engine(af_random_engine *engineHandle,
+                               af_random_engine_type rtype, uintl seed) {
     try {
         AF_CHECK(af_init());
         validateRandomType(rtype);
+
         RandomEngine e;
-        e.type = rtype;
-        *e.seed = seed;
+        e.type     = rtype;
+        *e.seed    = seed;
         *e.counter = 0;
 
         if (rtype == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-            AF_CHECK(af_create_array(&e.pos, pos, 1, &MaxBlocks, u32));
-            AF_CHECK(af_create_array(&e.sh1, sh1, 1, &MaxBlocks, u32));
-            AF_CHECK(af_create_array(&e.sh2, sh2, 1, &MaxBlocks, u32));
+            e.pos  = createHostDataArray<uint>(dim4(MaxBlocks), pos);
+            e.sh1  = createHostDataArray<uint>(dim4(MaxBlocks), sh1);
+            e.sh2  = createHostDataArray<uint>(dim4(MaxBlocks), sh2);
             e.mask = mask;
-            AF_CHECK(af_create_array(&e.recursion_table, recursion_tbl, 1, &TableLength, u32));
-            AF_CHECK(af_create_array(&e.temper_table, temper_tbl, 1, &TableLength, u32));
-            AF_CHECK(af_create_handle(&e.state, 1, &MtStateLength, u32));
-            initMersenneState(getWritableArray<uint>(e.state), seed, getArray<uint>(e.recursion_table));
-        } else {
-            dim_t empty = 0;
-            AF_CHECK(af_create_handle(&e.pos, 1, &empty, u32));
-            AF_CHECK(af_create_handle(&e.sh1, 1, &empty, u32));
-            AF_CHECK(af_create_handle(&e.sh2, 1, &empty, u32));
-            e.mask = 0;
-            AF_CHECK(af_create_handle(&e.recursion_table, 1, &empty, u32));
-            AF_CHECK(af_create_handle(&e.temper_table, 1, &empty, u32));
-            AF_CHECK(af_create_handle(&e.state, 1, &empty, u32));
+
+            e.recursion_table =
+                createHostDataArray<uint>(dim4(TableLength), recursion_tbl);
+            e.temper_table =
+                createHostDataArray<uint>(dim4(TableLength), temper_tbl);
+            e.state = createEmptyArray<uint>(dim4(MtStateLength));
+
+            initMersenneState(e.state, seed, e.recursion_table);
         }
 
         *engineHandle = getRandomEngineHandle(e);
-    } CATCHALL;
+    }
+    CATCHALL;
 
     return AF_SUCCESS;
 }
 
-af_err af_retain_random_engine(af_random_engine *outHandle, const af_random_engine engineHandle)
-{
+af_err af_retain_random_engine(af_random_engine *outHandle,
+                               const af_random_engine engineHandle) {
     try {
         AF_CHECK(af_init());
-        RandomEngine engine = *(getRandomEngine(engineHandle));
-        RandomEngine out;
-
-        out.type = engine.type;
-        out.seed = engine.seed;
-        out.counter = engine.counter;
-
-        AF_CHECK(af_retain_array(&out.pos, engine.pos));
-        AF_CHECK(af_retain_array(&out.sh1, engine.sh1));
-        AF_CHECK(af_retain_array(&out.sh2, engine.sh2));
-        out.mask = engine.mask;
-        AF_CHECK(af_retain_array(&out.recursion_table, engine.recursion_table));
-        AF_CHECK(af_retain_array(&out.temper_table, engine.temper_table));
-        AF_CHECK(af_retain_array(&out.state, engine.state));
-
-        *outHandle = getRandomEngineHandle(out);
-
-    } CATCHALL;
+        *outHandle = getRandomEngineHandle(*(getRandomEngine(engineHandle)));
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_random_engine_set_type(af_random_engine *engine, const af_random_engine_type rtype)
-{
+af_err af_random_engine_set_type(af_random_engine *engine,
+                                 const af_random_engine_type rtype) {
     try {
         AF_CHECK(af_init());
         validateRandomType(rtype);
-        RandomEngine e = *(getRandomEngine(engine));
-        if (rtype != e.type) {
+        RandomEngine *e = getRandomEngine(*engine);
+        if (rtype != e->type) {
             if (rtype == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-                bool empty;
-                AF_CHECK(af_is_empty(&empty, e.state));
-                if (empty) {
-                    AF_CHECK(af_release_array(e.pos));
-                    AF_CHECK(af_release_array(e.sh1));
-                    AF_CHECK(af_release_array(e.sh2));
-                    AF_CHECK(af_release_array(e.recursion_table));
-                    AF_CHECK(af_release_array(e.temper_table));
-                    AF_CHECK(af_release_array(e.state));
-                    AF_CHECK(af_create_array(&e.pos, pos, 1, &MaxBlocks, u32));
-                    AF_CHECK(af_create_array(&e.sh1, sh1, 1, &MaxBlocks, u32));
-                    AF_CHECK(af_create_array(&e.sh2, sh2, 1, &MaxBlocks, u32));
-                    e.mask = mask;
-                    AF_CHECK(af_create_array(&e.recursion_table, recursion_tbl, 1, &TableLength, u32));
-                    AF_CHECK(af_create_array(&e.temper_table, temper_tbl, 1, &TableLength, u32));
-                    AF_CHECK(af_create_handle(&e.state, 1, &MtStateLength, u32));
-                    initMersenneState(getWritableArray<uint>(e.state), *e.seed, getArray<uint>(e.recursion_table));
-                }
+                e->pos  = createHostDataArray<uint>(dim4(MaxBlocks), pos);
+                e->sh1  = createHostDataArray<uint>(dim4(MaxBlocks), sh1);
+                e->sh2  = createHostDataArray<uint>(dim4(MaxBlocks), sh2);
+                e->mask = mask;
+
+                e->recursion_table =
+                    createHostDataArray<uint>(dim4(TableLength), recursion_tbl);
+                e->temper_table =
+                    createHostDataArray<uint>(dim4(TableLength), temper_tbl);
+                e->state = createEmptyArray<uint>(dim4(MtStateLength));
+
+                initMersenneState(e->state, *(e->seed), e->recursion_table);
+            } else if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
+                e->pos             = emptyArray();
+                e->sh1             = emptyArray();
+                e->sh2             = emptyArray();
+                e->mask            = 0;
+                e->recursion_table = emptyArray();
+                e->temper_table    = emptyArray();
+                e->state           = emptyArray();
             }
-            e.type = rtype;
+            e->type = rtype;
         }
-    } CATCHALL;
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_random_engine_get_type(af_random_engine_type *rtype, const af_random_engine engine)
-{
+af_err af_random_engine_get_type(af_random_engine_type *rtype,
+                                 const af_random_engine engine) {
     try {
         AF_CHECK(af_init());
         RandomEngine *e = getRandomEngine(engine);
-        *rtype = e->type;
-    } CATCHALL;
+        *rtype          = e->type;
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_set_default_random_engine_type(const af_random_engine_type rtype)
-{
+af_err af_set_default_random_engine_type(const af_random_engine_type rtype) {
     try {
         AF_CHECK(af_init());
         af_random_engine e;
         AF_CHECK(af_get_default_random_engine(&e));
         AF_CHECK(af_random_engine_set_type(&e, rtype));
-    } CATCHALL;
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_random_engine_set_seed(af_random_engine *engine, const uintl seed)
-{
+af_err af_random_engine_set_seed(af_random_engine *engine, const uintl seed) {
     try {
         AF_CHECK(af_init());
         RandomEngine *e = getRandomEngine(*engine);
-        *(e->seed) = seed;
+        *(e->seed)      = seed;
         if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-            initMersenneState(getWritableArray<uint>(e->state), seed, getArray<uint>(e->recursion_table));
+            initMersenneState(e->state, seed, e->recursion_table);
         } else {
             *(e->counter) = 0;
         }
@@ -244,40 +265,41 @@ af_err af_random_engine_set_seed(af_random_engine *engine, const uintl seed)
     return AF_SUCCESS;
 }
 
-af_err af_random_engine_get_seed(uintl * const seed, af_random_engine engine)
-{
+af_err af_random_engine_get_seed(uintl *const seed, af_random_engine engine) {
     try {
         AF_CHECK(af_init());
         RandomEngine *e = getRandomEngine(engine);
-        *seed = *(e->seed);
+        *seed           = *(e->seed);
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_random_uniform(af_array *out, const unsigned ndims, const dim_t * const dims, const af_dtype type, af_random_engine engine)
-{
+af_err af_random_uniform(af_array *out, const unsigned ndims,
+                         const dim_t *const dims, const af_dtype type,
+                         af_random_engine engine) {
     try {
         AF_CHECK(af_init());
         af_array result;
 
-        af::dim4 d = verifyDims(ndims, dims);
+        dim4 d          = verifyDims(ndims, dims);
         RandomEngine *e = getRandomEngine(engine);
 
-        switch(type) {
-        case f32:   result = uniformDistribution_<float  >(d, e); break;
-        case c32:   result = uniformDistribution_<cfloat >(d, e); break;
-        case f64:   result = uniformDistribution_<double >(d, e); break;
-        case c64:   result = uniformDistribution_<cdouble>(d, e); break;
-        case s32:   result = uniformDistribution_<int    >(d, e); break;
-        case u32:   result = uniformDistribution_<uint   >(d, e); break;
-        case s64:   result = uniformDistribution_<intl   >(d, e); break;
-        case u64:   result = uniformDistribution_<uintl  >(d, e); break;
-        case s16:   result = uniformDistribution_<short  >(d, e); break;
-        case u16:   result = uniformDistribution_<ushort >(d, e); break;
-        case u8:    result = uniformDistribution_<uchar  >(d, e); break;
-        case b8:    result = uniformDistribution_<char   >(d, e); break;
-        default:    TYPE_ERROR(4, type);
+        switch (type) {
+            case f32: result = uniformDistribution_<float>(d, e); break;
+            case c32: result = uniformDistribution_<cfloat>(d, e); break;
+            case f64: result = uniformDistribution_<double>(d, e); break;
+            case c64: result = uniformDistribution_<cdouble>(d, e); break;
+            case s32: result = uniformDistribution_<int>(d, e); break;
+            case u32: result = uniformDistribution_<uint>(d, e); break;
+            case s64: result = uniformDistribution_<intl>(d, e); break;
+            case u64: result = uniformDistribution_<uintl>(d, e); break;
+            case s16: result = uniformDistribution_<short>(d, e); break;
+            case u16: result = uniformDistribution_<ushort>(d, e); break;
+            case u8: result = uniformDistribution_<uchar>(d, e); break;
+            case b8: result = uniformDistribution_<char>(d, e); break;
+            case f16: result = uniformDistribution_<half>(d, e); break;
+            default: TYPE_ERROR(4, type);
         }
         std::swap(*out, result);
     }
@@ -285,21 +307,23 @@ af_err af_random_uniform(af_array *out, const unsigned ndims, const dim_t * cons
     return AF_SUCCESS;
 }
 
-af_err af_random_normal(af_array *out, const unsigned ndims, const dim_t * const dims, const af_dtype type, af_random_engine engine)
-{
+af_err af_random_normal(af_array *out, const unsigned ndims,
+                        const dim_t *const dims, const af_dtype type,
+                        af_random_engine engine) {
     try {
         AF_CHECK(af_init());
         af_array result;
 
-        af::dim4 d = verifyDims(ndims, dims);
+        dim4 d          = verifyDims(ndims, dims);
         RandomEngine *e = getRandomEngine(engine);
 
-        switch(type) {
-        case f32:   result = normalDistribution_<float  >(d, e); break;
-        case c32:   result = normalDistribution_<cfloat >(d, e); break;
-        case f64:   result = normalDistribution_<double >(d, e); break;
-        case c64:   result = normalDistribution_<cdouble>(d, e); break;
-        default:    TYPE_ERROR(4, type);
+        switch (type) {
+            case f32: result = normalDistribution_<float>(d, e); break;
+            case c32: result = normalDistribution_<cfloat>(d, e); break;
+            case f64: result = normalDistribution_<double>(d, e); break;
+            case c64: result = normalDistribution_<cdouble>(d, e); break;
+            case f16: result = normalDistribution_<half>(d, e); break;
+            default: TYPE_ERROR(4, type);
         }
         std::swap(*out, result);
     }
@@ -307,27 +331,17 @@ af_err af_random_normal(af_array *out, const unsigned ndims, const dim_t * const
     return AF_SUCCESS;
 }
 
-af_err af_release_random_engine(af_random_engine engineHandle)
-{
+af_err af_release_random_engine(af_random_engine engineHandle) {
     try {
         AF_CHECK(af_init());
-        RandomEngine *e = getRandomEngine(engineHandle);
-        if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
-            AF_CHECK(af_release_array(e->pos));
-            AF_CHECK(af_release_array(e->sh1));
-            AF_CHECK(af_release_array(e->sh2));
-            AF_CHECK(af_release_array(e->recursion_table));
-            AF_CHECK(af_release_array(e->temper_table));
-            AF_CHECK(af_release_array(e->state));
-        }
-        delete e;
+        delete getRandomEngine(engineHandle);
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_randu(af_array *out, const unsigned ndims, const dim_t * const dims, const af_dtype type)
-{
+af_err af_randu(af_array *out, const unsigned ndims, const dim_t *const dims,
+                const af_dtype type) {
     try {
         AF_CHECK(af_init());
         af_array result;
@@ -335,22 +349,23 @@ af_err af_randu(af_array *out, const unsigned ndims, const dim_t * const dims, c
         af_random_engine engine;
         AF_CHECK(af_get_default_random_engine(&engine));
         RandomEngine *e = getRandomEngine(engine);
-        af::dim4 d = verifyDims(ndims, dims);
+        dim4 d          = verifyDims(ndims, dims);
 
-        switch(type) {
-        case f32: result = uniformDistribution_<float  >(d, e); break;
-        case c32: result = uniformDistribution_<cfloat >(d, e); break;
-        case f64: result = uniformDistribution_<double >(d, e); break;
-        case c64: result = uniformDistribution_<cdouble>(d, e); break;
-        case s32: result = uniformDistribution_<int    >(d, e); break;
-        case u32: result = uniformDistribution_<uint   >(d, e); break;
-        case s64: result = uniformDistribution_<intl   >(d, e); break;
-        case u64: result = uniformDistribution_<uintl  >(d, e); break;
-        case s16: result = uniformDistribution_<short  >(d, e); break;
-        case u16: result = uniformDistribution_<ushort >(d, e); break;
-        case u8:  result = uniformDistribution_<uchar  >(d, e); break;
-        case b8:  result = uniformDistribution_<char   >(d, e); break;
-        default:  TYPE_ERROR(3, type);
+        switch (type) {
+            case f32: result = uniformDistribution_<float>(d, e); break;
+            case c32: result = uniformDistribution_<cfloat>(d, e); break;
+            case f64: result = uniformDistribution_<double>(d, e); break;
+            case c64: result = uniformDistribution_<cdouble>(d, e); break;
+            case s32: result = uniformDistribution_<int>(d, e); break;
+            case u32: result = uniformDistribution_<uint>(d, e); break;
+            case s64: result = uniformDistribution_<intl>(d, e); break;
+            case u64: result = uniformDistribution_<uintl>(d, e); break;
+            case s16: result = uniformDistribution_<short>(d, e); break;
+            case u16: result = uniformDistribution_<ushort>(d, e); break;
+            case u8: result = uniformDistribution_<uchar>(d, e); break;
+            case b8: result = uniformDistribution_<char>(d, e); break;
+            case f16: result = uniformDistribution_<half>(d, e); break;
+            default: TYPE_ERROR(3, type);
         }
         std::swap(*out, result);
     }
@@ -358,8 +373,8 @@ af_err af_randu(af_array *out, const unsigned ndims, const dim_t * const dims, c
     return AF_SUCCESS;
 }
 
-af_err af_randn(af_array *out, const unsigned ndims, const dim_t * const dims, const af_dtype type)
-{
+af_err af_randn(af_array *out, const unsigned ndims, const dim_t *const dims,
+                const af_dtype type) {
     try {
         AF_CHECK(af_init());
         af_array result;
@@ -367,14 +382,15 @@ af_err af_randn(af_array *out, const unsigned ndims, const dim_t * const dims, c
         af_random_engine engine;
         AF_CHECK(af_get_default_random_engine(&engine));
         RandomEngine *e = getRandomEngine(engine);
-        af::dim4 d = verifyDims(ndims, dims);
+        dim4 d          = verifyDims(ndims, dims);
 
-        switch(type) {
-        case f32: result = normalDistribution_<float  >(d, e); break;
-        case c32: result = normalDistribution_<cfloat >(d, e); break;
-        case f64: result = normalDistribution_<double >(d, e); break;
-        case c64: result = normalDistribution_<cdouble>(d, e); break;
-        default:  TYPE_ERROR(3, type);
+        switch (type) {
+            case f32: result = normalDistribution_<float>(d, e); break;
+            case c32: result = normalDistribution_<cfloat>(d, e); break;
+            case f64: result = normalDistribution_<double>(d, e); break;
+            case c64: result = normalDistribution_<cdouble>(d, e); break;
+            case f16: result = normalDistribution_<half>(d, e); break;
+            default: TYPE_ERROR(3, type);
         }
         std::swap(*out, result);
     }
@@ -382,24 +398,24 @@ af_err af_randn(af_array *out, const unsigned ndims, const dim_t * const dims, c
     return AF_SUCCESS;
 }
 
-af_err af_set_seed(const uintl seed)
-{
+af_err af_set_seed(const uintl seed) {
     try {
         AF_CHECK(af_init());
         af_random_engine engine;
         AF_CHECK(af_get_default_random_engine(&engine));
         AF_CHECK(af_random_engine_set_seed(&engine, seed));
-    } CATCHALL;
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
-af_err af_get_seed(uintl *seed)
-{
+af_err af_get_seed(uintl *seed) {
     try {
         AF_CHECK(af_init());
         af_random_engine e;
         AF_CHECK(af_get_default_random_engine(&e));
         AF_CHECK(af_random_engine_get_seed(seed, e));
-    } CATCHALL;
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }

@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T>
-    Array<T> inverse(const Array<T> &in);
-}
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+Array<T> inverse(const Array<T> &in);
+}  // namespace cuda
+}  // namespace arrayfire

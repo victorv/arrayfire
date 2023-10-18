@@ -8,119 +8,65 @@
  ********************************************************/
 
 #pragma once
-#pragma once
-#include <kernel_headers/cscmv.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <cache.hpp>
-#include <type_util.hpp>
-#include "scan_dim.hpp"
-#include "reduce.hpp"
-#include "scan_first.hpp"
-#include "config.hpp"
+#include <kernel/config.hpp>
+#include <kernel/reduce.hpp>
+#include <kernel/scan_dim.hpp>
+#include <kernel/scan_first.hpp>
+#include <kernel_headers/cscmv.hpp>
+#include <traits.hpp>
 #include <af/opencl.h>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
 
-namespace opencl
-{
-    namespace kernel
-    {
-        template<typename T>
-        void cscmv(Param out,
-                   const Param &values, const Param &colIdx, const Param &rowIdx,
-                   const Param &rhs, const T alpha, const T beta, bool is_conj)
-        {
-            try {
-                bool use_alpha = (alpha != scalar<T>(1.0));
-                bool use_beta = (beta != scalar<T>(0.0));
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
+template<typename T>
+void cscmv(Param out, const Param &values, const Param &colIdx,
+           const Param &rowIdx, const Param &rhs, const T alpha, const T beta,
+           bool is_conj) {
+    // TODO: rows_per_group limited by register pressure. Find better way to
+    // handle this.
+    constexpr int rows_per_group = 64;
 
-                int threads = 256;
-                //TODO: rows_per_group limited by register pressure. Find better way to handle this.
-                int rows_per_group = 64;
+    const bool use_alpha = (alpha != scalar<T>(1.0));
+    const bool use_beta  = (beta != scalar<T>(0.0));
 
-                std::string ref_name =
-                    std::string("cscmv_") +
-                    std::string(dtype_traits<T>::getName()) +
-                    std::string("_") +
-                    std::to_string(use_alpha) +
-                    std::string("_") +
-                    std::to_string(use_beta) +
-                    std::string("_") +
-                    std::to_string(is_conj) +
-                    std::string("_") +
-                    std::to_string(rows_per_group) +
-                    std::string("_") +
-                    std::to_string(threads);
+    cl::NDRange local(THREADS_PER_GROUP);
 
-                int device = getActiveDeviceId();
-                auto idx = kernelCaches[device].find(ref_name);
-                kc_entry_t entry;
+    std::array<TemplateArg, 6> targs = {
+        TemplateTypename<T>(),       TemplateArg(use_alpha),
+        TemplateArg(use_beta),       TemplateArg(is_conj),
+        TemplateArg(rows_per_group), TemplateArg(local[0]),
+    };
+    std::array<std::string, 8> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(USE_ALPHA, use_alpha),
+        DefineKeyValue(USE_BETA, use_beta),
+        DefineKeyValue(IS_CONJ, is_conj),
+        DefineKeyValue(THREADS, local[0]),
+        DefineKeyValue(ROWS_PER_GROUP, rows_per_group),
+        DefineKeyValue(IS_CPLX, (iscplx<T>() ? 1 : 0)),
+        getTypeBuildDefinition<T>()};
 
-                if (idx == kernelCaches[device].end()) {
+    auto cscmvBlock =
+        common::getKernel("cscmv_block", {{cscmv_cl_src}}, targs, options);
 
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    options << " -D USE_ALPHA=" << use_alpha;
-                    options << " -D USE_BETA=" << use_beta;
-                    options << " -D IS_CONJ=" << is_conj;
-                    options << " -D THREADS=" << threads;
-                    options << " -D ROWS_PER_GROUP=" << rows_per_group;
+    int K        = colIdx.info.dims[0] - 1;
+    int M        = out.info.dims[0];
+    int groups_x = divup(M, rows_per_group);
+    cl::NDRange global(local[0] * groups_x, 1);
 
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    if (std::is_same<T, cfloat>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D IS_CPLX=1";
-                    } else {
-                        options << " -D IS_CPLX=0";
-                    }
-
-                    const char *ker_strs[] = {cscmv_cl};
-                    const int   ker_lens[] = {cscmv_cl_len};
-
-                    Program prog;
-                    buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-                    entry.prog = new Program(prog);
-                    entry.ker  = new Kernel(*entry.prog, "cscmv_block");
-                } else {
-                    entry = idx->second;
-                }
-
-                auto cscmv_kernel = *entry.ker;
-                auto cscmv_func = KernelFunctor<Buffer,
-                                                Buffer, Buffer, Buffer,
-                                                int, int,
-                                                Buffer, KParam, T, T>(cscmv_kernel);
-
-                NDRange local(threads);
-                int K = colIdx.info.dims[0] - 1;
-                int M = out.info.dims[0];
-                int groups_x = divup(M, rows_per_group);
-                NDRange global(local[0] * groups_x, 1);
-
-                cscmv_func(EnqueueArgs(getQueue(), global, local),
-                           *out.data, *values.data, *colIdx.data, *rowIdx.data,
-                           M, K, *rhs.data, rhs.info, alpha, beta);
-
-                CL_DEBUG_FINISH(getQueue());
-            } catch (cl::Error &ex) {
-                CL_TO_AF_ERROR(ex);
-            }
-        }
-    }
+    cscmvBlock(cl::EnqueueArgs(getQueue(), global, local), *out.data,
+               *values.data, *colIdx.data, *rowIdx.data, M, K, *rhs.data,
+               rhs.info, alpha, beta);
+    CL_DEBUG_FINISH(getQueue());
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

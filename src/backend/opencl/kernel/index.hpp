@@ -8,86 +8,60 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/index.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/index.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-
-namespace kernel
-{
-
-static const int THREADS_X = 32;
-static const int THREADS_Y =  8;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
 typedef struct {
-    int  offs[4];
+    int offs[4];
     int strds[4];
-    char     isSeq[4];
+    char isSeq[4];
 } IndexKernelParam_t;
 
 template<typename T>
-void index(Param out, const Param in, const IndexKernelParam_t& p, Buffer *bPtr[4])
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*>  idxProgs;
-        static std::map<int, Kernel*> idxKernels;
+void index(Param out, const Param in, const IndexKernelParam_t& p,
+           cl::Buffer* bPtr[4]) {
+    std::array<std::string, 2> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        getTypeBuildDefinition<T>()};
 
-        int device = getActiveDeviceId();
-
-        std::call_once( compileFlags[device], [device] () {
-                std::ostringstream options;
-                options << " -D T=" << dtype_traits<T>::getName();
-
-                if (std::is_same<T, double>::value ||
-                    std::is_same<T, cdouble>::value) {
-                options << " -D USE_DOUBLE";
-                }
-
-                Program prog;
-                buildProgram(prog, index_cl, index_cl_len, options.str());
-                idxProgs[device]   = new Program(prog);
-                idxKernels[device] = new Kernel(*idxProgs[device], "indexKernel");
-                });
-
-        NDRange local(THREADS_X, THREADS_Y);
-
-        int blk_x = divup(out.info.dims[0], THREADS_X);
-        int blk_y = divup(out.info.dims[1], THREADS_Y);
-
-        NDRange global(blk_x * out.info.dims[2] * THREADS_X,
-                blk_y * out.info.dims[3] * THREADS_Y);
-
-        auto indexOp = KernelFunctor<Buffer, KParam, Buffer, KParam, IndexKernelParam_t,
-             Buffer, Buffer, Buffer, Buffer, int, int>(*idxKernels[device]);
-
-        indexOp(EnqueueArgs(getQueue(), global, local),
-                *out.data, out.info, *in.data, in.info, p,
-                *bPtr[0], *bPtr[1], *bPtr[2], *bPtr[3], blk_x, blk_y);
-
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
+    auto index =
+        common::getKernel("indexKernel", {{index_cl_src}},
+                          TemplateArgs(TemplateTypename<T>()), options);
+    int threads_x = 256;
+    int threads_y = 1;
+    cl::NDRange local(threads_x, threads_y);
+    switch (out.info.dims[1]) {
+        case 1: threads_y = 1; break;
+        case 2: threads_y = 2; break;
+        case 3:
+        case 4: threads_y = 4; break;
+        default: threads_y = 8; break;
     }
-}
+    threads_x = static_cast<unsigned>(256.f / threads_y);
 
-}
+    int blk_x = divup(out.info.dims[0], local[0]);
+    int blk_y = divup(out.info.dims[1], local[1]);
 
+    cl::NDRange global(blk_x * out.info.dims[2] * local[0],
+                       blk_y * out.info.dims[3] * local[1]);
+
+    index(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+          *in.data, in.info, p, *bPtr[0], *bPtr[1], *bPtr[2], *bPtr[3], blk_x,
+          blk_y);
+    CL_DEBUG_FINISH(getQueue());
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

@@ -9,10 +9,11 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-
-template<typename inType, typename outType, af_match_type mType>
-Array<outType> match_template(const Array<inType> &sImg, const Array<inType> &tImg);
-
-}
+namespace arrayfire {
+namespace cuda {
+template<typename inType, typename outType>
+Array<outType> match_template(const Array<inType> &sImg,
+                              const Array<inType> &tImg,
+                              const af::matchType mType);
+}  // namespace cuda
+}  // namespace arrayfire

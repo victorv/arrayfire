@@ -8,80 +8,49 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/iota.hpp>
-#include <af/dim4.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/half.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/iota.hpp>
+#include <traits.hpp>
+#include <af/dim4.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-    namespace kernel
-    {
-        // Kernel Launch Config Values
-        static const int IOTA_TX = 32;
-        static const int IOTA_TY = 8;
-        static const int TILEX = 512;
-        static const int TILEY = 32;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-        template<typename T>
-        void iota(Param out, const af::dim4 &sdims, const af::dim4 &tdims)
-        {
-            try {
-                static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-                static std::map<int, Program*>  iotaProgs;
-                static std::map<int, Kernel*> iotaKernels;
+template<typename T>
+void iota(Param out, const af::dim4& sdims) {
+    constexpr int IOTA_TX = 32;
+    constexpr int IOTA_TY = 8;
+    constexpr int TILEX   = 512;
+    constexpr int TILEY   = 32;
 
-                int device = getActiveDeviceId();
+    std::array<std::string, 2> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        getTypeBuildDefinition<T>()};
 
-                std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, iota_cl, iota_cl_len, options.str());
-                    iotaProgs[device]   = new Program(prog);
-                    iotaKernels[device] = new Kernel(*iotaProgs[device], "iota_kernel");
-                });
+    auto iota = common::getKernel("iota_kernel", {{iota_cl_src}},
+                                  TemplateArgs(TemplateTypename<T>()), options);
+    cl::NDRange local(IOTA_TX, IOTA_TY, 1);
 
-                auto iotaOp = KernelFunctor<Buffer, const KParam,
-                                          const int, const int, const int, const int,
-                                          const int, const int, const int, const int,
-                                          const int, const int> (*iotaKernels[device]);
+    int blocksPerMatX = divup(out.info.dims[0], TILEX);
+    int blocksPerMatY = divup(out.info.dims[1], TILEY);
+    cl::NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
+                       local[1] * blocksPerMatY * out.info.dims[3], 1);
 
-                NDRange local(IOTA_TX, IOTA_TY, 1);
-
-                int blocksPerMatX = divup(out.info.dims[0], TILEX);
-                int blocksPerMatY = divup(out.info.dims[1], TILEY);
-                NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
-                               local[1] * blocksPerMatY * out.info.dims[3],
-                               1);
-
-                iotaOp(EnqueueArgs(getQueue(), global, local),
-                       *out.data, out.info, sdims[0], sdims[1], sdims[2], sdims[3],
-                       tdims[0], tdims[1], tdims[2], tdims[3], blocksPerMatX, blocksPerMatY);
-
-                CL_DEBUG_FINISH(getQueue());
-            } catch (cl::Error err) {
-                CL_TO_AF_ERROR(err);
-                throw;
-            }
-        }
-    }
+    iota(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+         static_cast<int>(sdims[0]), static_cast<int>(sdims[1]),
+         static_cast<int>(sdims[2]), static_cast<int>(sdims[3]), blocksPerMatX,
+         blocksPerMatY);
+    CL_DEBUG_FINISH(getQueue());
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

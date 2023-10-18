@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    Array<T> identity(const dim4& dim);
-}
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<T> identity(const dim4& dim);
+}  // namespace cpu
+}  // namespace arrayfire

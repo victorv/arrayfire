@@ -10,47 +10,29 @@
 #ifndef __MAGMA_BLAS_H
 #define __MAGMA_BLAS_H
 
-#include "magma_common.h"
-#include <defines.hpp>
+// This file contains the common interface for Magma OpenCL BLAS
+// functions. They can be implemented in different back-ends,
+// such as CLBlast or clBLAS.
+
 #include <types.hpp>
-#include <clBLAS.h>
-#include <err_clblas.hpp>
+#include "magma_common.h"
 
-using opencl::cfloat;
-using opencl::cdouble;
+using arrayfire::opencl::cdouble;
+using arrayfire::opencl::cfloat;
 
-#define clblasSherk(...) clblasSsyrk(__VA_ARGS__)
-#define clblasDherk(...) clblasDsyrk(__VA_ARGS__)
+template<typename T>
+struct gpu_blas_gemm_func;
+template<typename T>
+struct gpu_blas_gemv_func;
+template<typename T>
+struct gpu_blas_trmm_func;
+template<typename T>
+struct gpu_blas_trsm_func;
+template<typename T>
+struct gpu_blas_trsv_func;
+template<typename T>
+struct gpu_blas_herk_func;
 
-#define BLAS_FUNC_DEF(NAME)                     \
-    template<typename T>                        \
-    struct gpu_blas_##NAME##_func;
+#include "magma_blas_clblast.h"
 
-#define BLAS_FUNC(NAME, TYPE, PREFIX)                       \
-    template<>                                              \
-    struct gpu_blas_##NAME##_func<TYPE>                     \
-    {                                                       \
-        template<typename... Args>                          \
-            clblasStatus                                    \
-            operator() (Args... args)                       \
-        {                                                   \
-            return clblas##PREFIX##NAME(clblasColumnMajor,  \
-                                        args...);           \
-        }                                                   \
-    };
-
-#define BLAS_FUNC_DECL(NAME)                    \
-    BLAS_FUNC_DEF(NAME)                         \
-    BLAS_FUNC(NAME, float,      S)              \
-    BLAS_FUNC(NAME, double,     D)              \
-    BLAS_FUNC(NAME, cfloat,     C)              \
-    BLAS_FUNC(NAME, cdouble,    Z)              \
-
-BLAS_FUNC_DECL(gemm)
-BLAS_FUNC_DECL(gemv)
-BLAS_FUNC_DECL(trmm)
-BLAS_FUNC_DECL(trsm)
-BLAS_FUNC_DECL(trsv)
-BLAS_FUNC_DECL(herk)
-
-#endif
+#endif  // __MAGMA_BLAS_H

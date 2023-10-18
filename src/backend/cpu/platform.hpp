@@ -9,34 +9,69 @@
 
 #pragma once
 
+#include <queue.hpp>
 #include <string>
 
+namespace arrayfire {
+namespace common {
+class ForgeManager;
+class MemoryManagerBase;
+}  // namespace common
+}  // namespace arrayfire
+
+using arrayfire::common::MemoryManagerBase;
+
+namespace arrayfire {
 namespace cpu {
-    class queue;
 
-    int getBackend();
+int getBackend();
 
-    std::string getDeviceInfo();
+std::string getDeviceInfo() noexcept;
 
-    bool isDoubleSupported(int device);
+bool isDoubleSupported(int device);
 
-    void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute);
+bool isHalfSupported(int device);
 
-    int getDeviceCount();
+void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute);
 
-    int setDevice(int device);
+int& getMaxJitSize();
 
-    int getActiveDeviceId();
+int getDeviceCount();
 
-    size_t getDeviceMemorySize(int device);
+void init();
 
-    size_t getHostMemorySize();
+unsigned getActiveDeviceId();
 
-    void sync(int device);
+size_t getDeviceMemorySize(int device);
 
-    queue& getQueue(int idx = 0);
+size_t getHostMemorySize();
 
-    unsigned getMaxJitSize();
+int setDevice(int device);
 
-    bool& evalFlag();
-}
+queue& getQueue(int device = 0);
+
+/// Return a handle to the queue for the device.
+///
+/// \param[in] device The device of the returned queue
+/// \returns The handle to the queue
+queue* getQueueHandle(int device);
+
+void sync(int device);
+
+bool& evalFlag();
+
+MemoryManagerBase& memoryManager();
+
+void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManager();
+
+// Pinned memory not supported
+void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManagerPinned();
+
+arrayfire::common::ForgeManager& forgeManager();
+
+}  // namespace cpu
+}  // namespace arrayfire

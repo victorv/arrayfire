@@ -11,33 +11,74 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <vector>
+
+#include <memory>
 #include <string>
-#if defined(WITH_GRAPHICS)
-#include <fg/window.h>
+#include <utility>
+
+/* Forward declarations of Opaque structure holding
+ * the following library contexts
+ *  * cuBLAS
+ *  * cuSparse
+ *  * cuSolver
+ */
+struct cublasContext;
+typedef struct cublasContext* BlasHandle;
+struct cusparseContext;
+typedef struct cusparseContext* SparseHandle;
+struct cusolverDnContext;
+typedef struct cusolverDnContext* SolveHandle;
+
+#ifdef WITH_CUDNN
+struct cudnnContext;
+typedef struct cudnnContext* cudnnHandle_t;
 #endif
 
-namespace cuda
-{
+namespace spdlog {
+class logger;
+}
+
+namespace arrayfire {
+namespace common {
+class ForgeManager;
+class MemoryManagerBase;
+}  // namespace common
+}  // namespace arrayfire
+
+using arrayfire::common::MemoryManagerBase;
+
+namespace arrayfire {
+namespace cuda {
+
+class GraphicsResourceManager;
+class PlanCache;
 
 int getBackend();
 
-std::string getDeviceInfo();
-std::string getDeviceInfo(int device);
+std::string getDeviceInfo() noexcept;
+std::string getDeviceInfo(int device) noexcept;
 
-std::string getPlatformInfo();
+std::string getPlatformInfo() noexcept;
 
-std::string getDriverVersion();
+std::string getDriverVersion() noexcept;
 
-std::string getCUDARuntimeVersion();
+// Returns the cuda runtime version as a string for the current build. If no
+// runtime is found or an error occured, the string "N/A" is returned
+std::string getCUDARuntimeVersion() noexcept;
 
-bool isDoubleSupported(int device);
+// Returns true if double is supported by the device
+bool isDoubleSupported(int device) noexcept;
 
-void devprop(char* d_name, char* d_platform, char *d_toolkit, char* d_compute);
+// Returns true if half is supported by the device
+bool isHalfSupported(int device);
 
-unsigned getMaxJitSize();
+void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute);
+
+int& getMaxJitSize();
 
 int getDeviceCount();
+
+void init();
 
 int getActiveDeviceId();
 
@@ -45,9 +86,37 @@ int getDeviceNativeId(int device);
 
 cudaStream_t getStream(int device);
 
+cudaStream_t getActiveStream();
+
+/// Returns true if the buffer on device buf_device_id can be accessed by
+/// kernels on device execution_id
+///
+/// \param[in] buf_device_id The device id of the buffer
+/// \param[in] execution_id The device where the buffer will be accessed.
+bool isDeviceBufferAccessible(int buf_device_id, int execution_id);
+
+/// Return a handle to the stream for the device.
+///
+/// \param[in] device The device of the returned stream
+/// \returns The handle to the queue/stream
+cudaStream_t getQueueHandle(int device);
+
 size_t getDeviceMemorySize(int device);
 
 size_t getHostMemorySize();
+
+size_t getL2CacheSize(const int device);
+
+// Returns int[3] of maxGridSize
+const int* getMaxGridSize(const int device);
+
+unsigned getMemoryBusWidth(const int device);
+
+// maximum nr of threads the device really can run in parallel, without
+// scheduling
+unsigned getMaxParallelThreads(const int device);
+
+unsigned getMultiProcessorCount(const int device);
 
 int setDevice(int device);
 
@@ -56,69 +125,39 @@ void sync(int device);
 // Returns true if the AF_SYNCHRONIZE_CALLS environment variable is set to 1
 bool synchronize_calls();
 
-cudaDeviceProp getDeviceProp(int device);
+const cudaDeviceProp& getDeviceProp(const int device);
 
-struct cudaDevice_t {
-    cudaDeviceProp prop;
-    size_t flops;
-    int nativeId;
-};
+std::pair<int, int> getComputeCapability(const int device);
 
 bool& evalFlag();
 
-class DeviceManager
-{
-    public:
-        static const unsigned MAX_DEVICES = 16;
+MemoryManagerBase& memoryManager();
 
-        static DeviceManager& getInstance();
+MemoryManagerBase& pinnedMemoryManager();
 
-        friend std::string getDeviceInfo(int device);
+void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
 
-        friend std::string getPlatformInfo();
+void resetMemoryManager();
 
-        friend std::string getDriverVersion();
+void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
 
-        friend std::string getCUDARuntimeVersion();
+void resetMemoryManagerPinned();
 
-        friend std::string getDeviceInfo();
+arrayfire::common::ForgeManager& forgeManager();
 
-        friend int getDeviceCount();
+GraphicsResourceManager& interopManager();
 
-        friend int getActiveDeviceId();
+PlanCache& fftManager();
 
-        friend int getDeviceNativeId(int device);
+BlasHandle blasHandle();
 
-        friend int getDeviceIdFromNativeId(int nativeId);
+#ifdef WITH_CUDNN
+cudnnHandle_t nnHandle();
+#endif
 
-        friend cudaStream_t getStream(int device);
+SolveHandle solverDnHandle();
 
-        friend int setDevice(int device);
+SparseHandle sparseHandle();
 
-        friend cudaDeviceProp getDeviceProp(int device);
-
-    private:
-        DeviceManager();
-
-        // Following two declarations are required to
-        // avoid copying accidental copy/assignment
-        // of instance returned by getInstance to other
-        // variables
-        DeviceManager(DeviceManager const&);
-        void operator=(DeviceManager const&);
-
-        // Attributes
-        std::vector<cudaDevice_t> cuDevices;
-
-        enum sort_mode {flops = 0, memory = 1, compute = 2, none = 3};
-
-        void sortDevices(sort_mode mode = flops);
-
-        int setActiveDevice(int device, int native = -1);
-
-        int activeDev;
-        int nDevices;
-        cudaStream_t streams[MAX_DEVICES];
-};
-
-}
+}  // namespace cuda
+}  // namespace arrayfire

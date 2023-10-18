@@ -34,7 +34,7 @@ and red-difference chroma components.
 \addtogroup  arrayfire_func
 @{
 
-\defgroup image_func_colorspace colorspace
+\defgroup image_func_colorspace colorSpace
 \ingroup colorconv_mat
 
 Colorspace conversion function
@@ -259,6 +259,46 @@ internally as (0.25 * rows + 0.75) for rows and similarly for columns.
 Sobel operators perform a 2-D spatial gradient measurement on an image
 to emphasize the regions of high spatial frequency, namely edges. A more in depth
 discussion on it can be found [here](http://en.wikipedia.org/wiki/Sobel_operator).
+
+=======================================================================
+
+\defgroup image_func_anisotropic_diffusion anisotropicDiffusion
+\ingroup imageflt_mat
+
+\brief Anisotropic Smoothing Filter
+
+Anisotropic diffusion algorithm aims at removing noise in the images while preserving important
+features such as edges. The algorithm essentially creates a scale space representation of the
+original image, where image from previous step is used to create a new version of blurred image
+using the diffusion process. Standard isotropic diffusion methods such as gaussian blur, doesn't
+take into account the local content(smaller neighborhood of current processing pixel) while removing
+noise. Anisotropic diffusion uses the flux equations given below to achieve that. Flux equation is the
+formula used by the diffusion process to determine how much a pixel in neighborhood should contribute to
+the blurring operation being done at the current pixel at a given iteration.
+
+The flux function can be either exponential or quadratic.
+
+<table>
+<caption id="multi row">Available Flux Functions</caption>
+<tr>
+    <td> AF_FLUX_QUADRATIC </td>
+    <td>  \f$ \frac{1}{1 + (\frac{\| \nabla I\|}{K})^2} \f$  </td>
+</tr>
+<tr>
+    <td> AF_FLUX_EXPONENTIAL </td>
+    <td>  \f$ \exp{-(\frac{\| \nabla I\|}{K})^2} \f$  </td>
+</tr>
+</table>
+
+Please be cautious using the time step parameter to the function. Appropriate time steps for solving this type of p.d.e. depend on the dimensionality of the image and the order of the equation. Stable values for most 2D and 3D functions are 0.125 and 0.0625, respectively. The time step values are automatically constrained to the stable value.
+
+Another input parameter to be cautious about is the conductance parameter, lower values strongly preserve image features and vice-versa. For human vision, this value ranges from 0.5 to 2.0.
+
+#### Reference
+Pietro Perona and Jitendra Malik, `Scale-space and edge detection using anisotropic diffusion,` IEEE Transactions on Pattern Analysis Machine Intelligence, vol. 12, pp. 629-639, 1990.
+
+#### Reference
+R. Whitaker and X. Xue. `Variable-Conductance, Level-Set Curvature for Image Denoising`, International Conference on Image Processing, 2001 pp. 142-145, Vol.3.
 
 =======================================================================
 
@@ -560,27 +600,39 @@ af_print(resize(2, in, AF_INTERP_BILINEAR));
 \defgroup transform_func_rotate rotate
 \ingroup transform_mat
 
-Rotate an input image
+\brief Rotate an input image or array
 
-The angle theta is in radians.
+The rotation is done counter-clockwise, with an angle \p theta (in radians),
+using a specified \p method of interpolation to determine the values of the
+output array. Six types of interpolation are currently supported:
 
-Rotating an input image can be done using \ref AF_INTERP_NEAREST,
-\ref AF_INTERP_BILINEAR or \ref AF_INTERP_LOWER interpolations. Nearest
-interpolation will pick the nearest value to the location, whereas bilinear
-interpolation will do a weighted interpolation for calculate the new size.
+- \ref AF_INTERP_NEAREST - nearest value to the location
+- \ref AF_INTERP_BILINEAR - weighted interpolation
+- \ref AF_INTERP_BILINEAR_COSINE - bilinear interpolation with cosine smoothing
+- \ref AF_INTERP_BICUBIC - bicubic interpolation
+- \ref AF_INTERP_BICUBIC_SPLINE - bicubic interpolation with Catmull-Rom splines
+- \ref AF_INTERP_LOWER - floor indexed
 
-This function does not differentiate between images and data. As long as
-the array is defined, it will rotate any type or size of array.
+Since the output image still needs to be an upright box, \p crop determines how
+to bound the output image, given the now-rotated image. The figure below
+illustrates the effect of changing this parameter.
 
-The crop option allows you to choose whether to resize the image.
-If crop is set to false, ie. the entire rotated image will be a part of the
-array and the new array size will be greater than or equal to the input array
-size.
-If crop is set to true, then the new array size is same as the input array
-size and the data that falls outside the boundaries of the array is discarded.
+\image html rotate_illus.png "Effect of \p crop parameter on the output"
 
-Any location of the rotated array that does not map to a location of the input
-array is set to 0.
+Here, the original image is represented by the innermost box with the solid
+black and dashed orange lines, and the (theoretical) rotated image is the box
+with the solid orange lines. If \p crop is true, then the output image's
+dimensions will stay the same as the original image's, but the rotated image's
+portions outside the dashed orange lines will be cropped, and the rest of the
+output image (the area between the solid black and solid orange lines) will be
+filled with zeros. However, if \p crop is false, then the output image's
+dimensions might get bigger (as shown in this illustration), as represented by
+the outermost box with dashed black lines. This change in dimensions is
+necessary to accommodate all of the rotated image's data. The remainder of the
+output image will be filled with zeros, as represented by the area between the
+solid orange lines and dashed black lines. Note that the new dimensions in
+general (beyond this illustration) will be greater than or equal the original
+image's dimensions when \p crop is false.
 
 
 \defgroup transform_func_translate translate
@@ -701,7 +753,7 @@ Affine transforms can be used for various purposes. \ref af::translate, \ref af:
 are specializations of the transform function.
 
 
-\defgroup transform_func_coordinates transformcoordinates
+\defgroup transform_func_coordinates transformCoordinates
 \ingroup transform_mat
 
 Transform input coordinates
@@ -714,7 +766,7 @@ transformed points.
 
 =======================================================================
 
-\defgroup image_func_sat SAT
+\defgroup image_func_sat sat
 \ingroup imageflt_mat
 
 \brief Summed Area Tables
@@ -730,112 +782,160 @@ The output array of this function will have \f$ S(x, y) \f$ values at their corr
 \defgroup image_func_unwrap unwrap
 \ingroup image_mod_mat
 
-Generate an array with image windows as columns
+\brief Rearrange windowed sections of an array into columns (or rows)
 
-unwrap takes in an input image along with the window sizes \p wx and \p
-wy, strides \p sx and \p sy, and padding \p px and \p py. This function then
-generates a matrix where each windows is an independent column.
+The figure below illustrates how unwrap works. A moving window (marked by
+orange boxes in the figure) of size `wx` \f$\times \f$ `wy` captures sections of
+the input array, and flattens them into columns (or rows if `is_column` is false)
+of the output array (illustrated in the right image). It starts at the top-left
+section of the input array and moves in column-major order, each time moving in
+strides of `sx` units along the column and `sy` units along the row, whenever it
+exhausts a column (stride size illustrated as the white arrows in the left image,
+and window movement illustrated as the progression of the small yellow numbers on
+the corner of each window). When the remainder of the column or row is not big
+enough to accomodate the window, that remainder is skipped and the window moves
+on (in the figure, the last row is not captured in any of the windows).
 
-The number of columns (rows if is_column is true) in the output array are govenered by the number of
-windows that can be fit along x and y directions. Padding is applied along all
-4 sides of the matrix with \p px defining the height of the padding along dim
-0 and \p py defining the width of the padding along dim 1.
+Optionally, one can specify that the input image's border be padded (with zeros,
+represented as the gray boxes in the figure) before the moving window starts
+capturing sections. The width of the padding is defined by `px` for the top and
+bottom and `py` for the left and right sides, with maximum values of `wx`-1 and
+`wy`-1, respectively. The moving window then captures sections as if the padding
+is part of the input image, and thus the padding also becomes part of the output
+array's columns (illustrated in the bottom of the right image).
 
-The first column window is always at the top left corner of the input including
-padding. If a window cannot fit before the end of the matrix + padding, it is
-skipped from the generated matrix.
+\image html unwrap_640.png "Unwrap on a 3x4 input array, using a 2x2 window, 2x2 stride, 1x1 padding"
 
-Padding can take a maximum value of window - 1 repectively for x and y.
+In the figure, the stride is set to be equally large as the window size (both
+2x2), and thus the sections that the window captures are distinct. However, when
+the stride is set to the minimum (1x1) and is smaller than the window size, the
+sections overlap (which in turn makes the output's columns overlap as well). The
+window then acts as a perfect "sliding window" in this case (see the first code
+example below). In general, there will be some overlap as long as the stride is
+smaller than the window size (though the overlap decreases as the stride
+approaches the window size), and when the stride is equal or greater than the
+window size, each section (and output column) will be distinct.
 
-For multiple channels (3rd and 4th dimension), the generated matrix contains
-the same number of channels as the input matrix. Each channel of the output
-matrix corresponds to the same channel of the input.
+For inputs that have more than two dimensions, the unwrap operation will be
+applied to each 2D slice of the input. This is especially useful for
+independently processing each channel of an image (or set of images) - each
+channel (along the third dimension) on the input corresponds to the same channel
+on the output, and each image (along the fourth dimension) on the input
+corresponds to the same image on the output.
 
-So the dimensions of the output matrix are:
+The size of the output is shown below. `nsections_dim0` and `nsections_dim1`
+denote how many windows can fit along the column and row, given the padded image
+size, window size, strides, and skips (if any):
+
 \code
-[(wx * wy),         // Column height
- (No. of windows along dim 0 of input * No. of windows along dim 1 of input), // No. of columns per channel
- input.dims()[2],   // Channels
- input.dims()[3]]   // Volumns
+dim4(
+    wx * wy,                               // No. of rows (column height)
+    nsections_dim0 * nsections_dim1,       // No. of columns per channel
+    input.dims(2),                         // No. of channels
+    input.dims(3)                          // No. of images
+)
 \endcode
 
-When strides are 1, the operation is sliding window. When strides are equal to
-the respective window sizes, the option is distinct window. Other stride
-values are also allowed.
+Here are some code examples that demonstrate unwrap's usage:
 
-\code
-A [5 5 1 1]
-10 15 20 25 30
-11 16 21 26 31
-12 17 22 27 32
-13 18 23 28 33
-14 19 24 29 34
+\snippet test/unwrap.cpp ex_unwrap
 
-// Window 3x3, strides 1x1, padding 0x0
-unwrap(A, 3, 3, 1, 1, 0, 0) [9 9 1 1]
-10 11 12 15 16 17 20 21 22
-11 12 13 16 17 18 21 22 23
-12 13 14 17 18 19 22 23 24
-15 16 17 20 21 22 25 26 27
-16 17 18 21 22 23 26 27 28
-17 18 19 22 23 24 27 28 29
-20 21 22 25 26 27 30 31 32
-21 22 23 26 27 28 31 32 33
-22 23 24 27 28 29 32 33 34
+One context where unwrap can be used is pre-processing an array or image for
+making window operations efficient (i.e. convolutions, computing the average
+pixel intensity around a point in an image, etc). Since each window capture is
+laid out as a column in an unwrapped array, vectorized operations can be executed
+efficiently on it (as opposed to strided access of each row in a window in the original
+array).
 
-// Window 3x3, strides 1x1, padding 1x1
-unwrap(A, 3, 3, 1, 1, 1, 1) [9 25 1 1]
- 0  0  0  0  0  0 10 11 12 13  0 15 16 17 18  0 20 21 22 23  0 25 26 27 28
- 0  0  0  0  0 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29
- 0  0  0  0  0 11 12 13 14  0 16 17 18 19  0 21 22 23 24  0 26 27 28 29  0
- 0 10 11 12 13  0 15 16 17 18  0 20 21 22 23  0 25 26 27 28  0 30 31 32 33
-10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34
-11 12 13 14  0 16 17 18 19  0 21 22 23 24  0 26 27 28 29  0 31 32 33 34  0
- 0 15 16 17 18  0 20 21 22 23  0 25 26 27 28  0 30 31 32 33  0  0  0  0  0
-15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34  0  0  0  0  0
-16 17 18 19  0 21 22 23 24  0 26 27 28 29  0 31 32 33 34  0  0  0  0  0  0
-
-// Window 3x3, strides 3x3 ("distinct"), padding 0x0
-unwrap(A, 3, 3, 3, 3, 0, 0) [9 1 1 1]
-   10
-   11
-   12
-   15
-   16
-   17
-   20
-   21
-   22
-
-// Window 3x3, strides 3x3 ("distinct"), padding 2x2
-unwrap(A, 3, 3, 3, 3, 2, 2) [9 9 1 1]
-    0     0     0     0    16    19     0    31    34
-    0     0     0     0    17     0     0    32     0
-    0     0     0    15    18     0    30    33     0
-    0     0     0     0    21    24     0     0     0
-    0     0     0     0    22     0     0     0     0
-    0     0     0    20    23     0     0     0     0
-    0    11    14     0    26    29     0     0     0
-    0    12     0     0    27     0     0     0     0
-   10    13     0    25    28     0     0     0     0
-\endcode
-
+Note that the actual implementation of unwrap may not match the way the operation
+is described above, but the effect should be the same.
 
 =======================================================================
 
 \defgroup image_func_wrap wrap
 \ingroup image_mod_mat
 
-Wrap takes an unwrapped image (see \ref unwrap()) and converts it back to an image.
+Performs the opposite of \ref af::unwrap().
 
-The inputs to this function should be the same as the inputs used to generate the unwrapped image.
+More specifically, wrap takes each column (or row if `is_column` is false) of the
+\f$m \times n\f$ input array and reshapes them into `wx` \f$\times\f$ `wy`
+patches (where \f$m =\f$ `wx` \f$\times\f$ `wy`) of the `ox` \f$\times\f$ `oy`
+output array. Wrap is typically used on an array that has been previously
+unwrapped - for example, in the case of image processing, one can unwrap an
+image, process the unwrapped array, and then compose it back into an image using
+wrap. 
+
+The figure below illustrates how wrap works. The process can be visualized as a
+moving window (orange boxes in the figure) taking a column from the input
+(top-left), reshaping it into a patch (bottom-left), and then placing that patch
+on its corresponding position in the output array (right; numbers in yellow show
+correspondence). It starts placing a patch on the output's top-left corner, then
+moves `sx` units along the column, and `sy` units along the row whenever it
+exhausts a column. If padding exists in the input array (gray-filled boxes),
+which typically happens when padding was applied on the previous unwrap, then
+`px` and `py` must be specified in order for the padding to be removed on the
+output array (in the figure, the output array on the right will actually only
+contain the inner boxes, size `ox` \f$\times\f$ `oy`).
+
+\image html wrap_distinct.png "Wrap on a 4x6 input array, using a 2x2 window, 2x2 stride, 1x1 padding. The output array is 3x4"
+
+There are some things that must be considered when wrapping a previously
+unwrapped array. First, wrap must use the same parameters that unwrap used, and
+must use the original array's size (before unwrap) as `ox` and `oy`. This is
+necessary to correctly elicit wrap's behavior as the opposite of unwrap. Second,
+one must consider whether the previous unwrap used a distinct or sliding window
+configuration, since the element-wise mapping from the input array to the output
+depends on the configuration. If the distinct window configuration (the stride is
+at least as large as the window size) was used, then the mapping is
+straightforward - each column will map to a unique section in the output array,
+and therefore each element in the input will map to a unique position in the
+output (shown in the figure above). However, in the case of the sliding window
+configuration (the stride is smaller than the window size), some of the columns
+will map to overlapping sections in the output array, and so elements from
+multiple columns will map to the same position on the output array. Recomposing
+the array then requires some way to choose between competing elements to place in
+that position. To address this contention, wrap simply sums all of the competing
+elements and places the sum in that position. The figure below illustrates this
+behavior: the fourth element of the first column and the third element of the
+second column in the input array both map to the same position on the output
+array, and thus their sum is placed on that position (this happens on the second
+and third column of the input as well - they both map to the third element of the
+second column in the output). Given this behavior, it is up to the user to
+pre-process the input (unwrapped) array (or post-process the output (wrapped)
+array) in a way that somehow takes all of the competing elements into
+consideration.
+
+\image html wrap_sliding.png "Wrap on the same array as above, but with 1x1 stride (sliding window)"
+
+For inputs that have more than two dimensions, the wrap operation will be
+applied to each 2D slice of the input. This is especially useful for
+independently processing each channel of an image (or set of images) - each
+channel (along the third dimension) on the input corresponds to the same channel
+on the output, and each image (along the fourth dimension) on the input
+corresponds to the same image on the output.
+
+Here are some code examples that demonstrate wrap's usage. The first one shows
+wrapping a previously unwrapped array that used a 1x1 padding and a distinct
+window configuration. Notice how the arguments used in unwrap are the same as
+those used in wrap:
+
+\snippet test/wrap.cpp ex_wrap_1
+
+The next one shows what happens when both unwrap and wrap uses the sliding window
+configuration. Notice how the original array is not recovered through wrap;
+instead, overlapping elements are summed, just as described above:
+
+\snippet test/wrap.cpp ex_wrap_2
+
+Note that the actual implementation of unwrap may not match the way the operation
+is visualized above, but the effect should be the same.
 
 =======================================================================
 
 \defgroup image_func_moments moments
 \ingroup moments_mat
 
-The \ref moments() function allows for finding different
+The \ref af::moments() function allows for finding different
 properties of image regions. Currently, ArrayFire calculates all first order moments.
 The moments are defined within the \ref af_moment_type enum.
 
@@ -857,6 +957,139 @@ double area = m00;
 double x_center = m10 / m00;
 double y_center = m01 / m00;
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+=======================================================================
+
+\defgroup image_func_canny canny
+\ingroup imageflt_mat
+
+\brief Canny Edge Detector
+
+The Canny edge detector is an edge detection operator that uses a multi-stage algorithm to detect a
+wide range of edges in images. A more in depth discussion on it can be found [here](https://en.wikipedia.org/wiki/Canny_edge_detector).
+
+=======================================================================
+
+\defgroup image_func_iterative_deconv iterativeDeconv
+\ingroup imageflt_mat
+
+\brief Iterative Deconvolution
+
+The following table shows the iteration update equations of the respective
+deconvolution algorithms.
+
+<table>
+<tr><th>Algorithm</th><th>Update Equation</th></tr>
+<tr>
+    <td>LandWeber</td>
+    <td>
+        \f$ \hat{I}_{n} = \hat{I}_{n-1} + \alpha * P^T \otimes (I - P \otimes \hat{I}_{n-1}) \f$
+    </td>
+</tr>
+<tr>
+  <td>Richardson-Lucy</td>
+  <td>
+    \f$ \hat{I}_{n} = \hat{I}_{n-1} . ( \frac{I}{\hat{I}_{n-1} \otimes P} \otimes P^T ) \f$
+  </td>
+</tr>
+</table>
+
+where
+    - \f$ I \f$ is the observed(input/blurred) image
+    - \f$ P \f$ is the point spread function
+    - \f$ P^T \f$ is the transpose of point spread function
+    - \f$ \hat{I}_{n} \f$ is the current iteration's updated image estimate
+    - \f$ \hat{I}_{n-1} \f$ is the previous iteration's image estimate
+    - \f$ \alpha \f$ is the relaxation factor
+    - \f$ \otimes \f$ indicates the convolution operator
+
+Iterative deconvolution function excepts \ref af::array of the following types only:
+    - \ref f32
+    - \ref s16
+    - \ref u16
+    - \ref u8
+
+\note The type of output \ref af::array from deconvolution will be double if
+the input array type is double. For other types, output type will be float.
+Should the caller want to save the image to disk or require the values of output
+to be in a fixed range, that should be done by the caller explicitly.
+
+=======================================================================
+
+\defgroup image_func_inverse_deconv inverseDeconv
+\ingroup imageflt_mat
+
+\brief Inverse Deconvolution
+
+Inverse deconvolution is an linear algorithm i.e. they are non-iterative in
+nature and usually faster than iterative deconvolution algorithms.
+
+Depending on the values passed on to the enum \ref af_inverse_deconv_algo,
+different equations are used to compute the final result.
+
+#### Tikhonov's Deconvolution Method:
+
+The update equation for this algorithm is as follows:
+
+\f[
+\hat{I}_{\omega} = \frac{ I_{\omega} * P^{*}_{\omega} } { |P_{\omega}|^2 + \gamma }
+\f]
+
+where
+    - \f$ I_{\omega} \f$ is the observed(input/blurred) image in frequency domain
+    - \f$ P_{\omega} \f$ is the point spread function in frequency domain
+    - \f$ \gamma \f$ is a user defined regularization constant
+
+Inverse deconvolution function excepts \ref af::array of the following types only:
+    - \ref f32
+    - \ref s16
+    - \ref u16
+    - \ref u8
+
+\note The type of output \ref af::array from deconvolution will be double
+if the input array type is double. Otherwise, it will be float in rest of
+the cases. Should the caller want to save the image to disk or require the
+values of output to be in a fixed range, that should be done by the caller
+explicitly.
+
+=======================================================================
+
+\defgroup image_func_confidence_cc confidenceCC
+\ingroup connected_comps_mat
+
+\brief Segment image based on similar pixel characteristics
+
+This filter is similar to \ref af::regions() (connected components) with additional
+criteria for segmentation. In \ref af::regions(), all connected (\ref af_connectivity)
+pixels connected are considered to be a single component. In this
+variation of connected components, pixels having similar pixel statistics
+of the neighborhoods around a given set of seed points are grouped together.
+
+The parameter \p radius determines the size of neighborhood around a seed point.
+
+Mean (\f$ \mu \f$) and Variance (\f$ \sigma^2 \f$) are the pixel statistics that
+are computed across all neighborhoods around the given set of seed points. The
+pixels which are connected to seed points and lie in the confidence interval
+ (\f$ [\mu - \alpha * \sigma, \mu + \alpha * \sigma] \f$ where \f$ \alpha \f$
+is the parameter \p multiplier) are grouped. \p multiplier can be used to
+control the width of the confidence interval.
+
+This filter follows an iterative approach for fine tuning the segmentation.
+An initial segmenetation followed by a finite number (\p iter) of segmentations
+are performed. The user provided parameter \p iter is only a request and the
+algorithm can prempt the execution if \f$ \sigma^2 \f$ approaches zero. The
+initial segmentation uses the mean and variance calculated from the neighborhoods
+of all the seed points. For subsequent segmentations, all pixels in the previous
+segmentation are used to re-calculate the mean and variance (as opposed to using
+the pixels in the neighborhood of the seed point).
+
+Given below is a sample output for segmenting three different regions of a
+donut using single seed.
+
+<img src="ccc_sample_output.png" align="center" alt="Confidence Connected Components Example"
+width="60%" height="60%"/>
+
+
+
 @}
 */
-

@@ -7,69 +7,59 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <gtest/gtest.h>
 #include <arrayfire.h>
+#include <gtest/gtest.h>
+#include <testHelpers.hpp>
 #include <af/dim4.hpp>
 #include <af/traits.hpp>
 #include <string>
 #include <vector>
-#include <testHelpers.hpp>
 
-using std::string;
-using std::vector;
-using af::cfloat;
+using af::array;
 using af::cdouble;
+using af::cfloat;
+using af::dim4;
+using af::dtype_traits;
+using std::endl;
+using std::vector;
 
 template<typename T>
-class Transpose : public ::testing::Test
-{
-    public:
-        virtual void SetUp() {
-        }
+class Transpose : public ::testing::Test {
+   public:
+    virtual void SetUp() {}
 };
 
 // create a list of types to be tested
-typedef ::testing::Types<float, cfloat, double, cdouble, int, uint, char, uchar, short, ushort> TestTypes;
+typedef ::testing::Types<float, cfloat, double, cdouble, int, uint, char, uchar,
+                         short, ushort>
+    TestTypes;
 
 // register the type list
-TYPED_TEST_CASE(Transpose, TestTypes);
+TYPED_TEST_SUITE(Transpose, TestTypes);
 
 template<typename T>
-void transposeip_test(af::dim4 dims)
-{
-    if (noDoubleTests<T>())
-        return;
+void transposeip_test(dim4 dims) {
+    SUPPORTED_TYPE_CHECK(T);
 
     af_array inArray  = 0;
     af_array outArray = 0;
 
-    ASSERT_EQ(AF_SUCCESS, af_randu(&inArray, dims.ndims(), dims.get(), (af_dtype) af::dtype_traits<T>::af_type));
+    ASSERT_SUCCESS(af_randu(&inArray, dims.ndims(), dims.get(),
+                            (af_dtype)dtype_traits<T>::af_type));
 
-    ASSERT_EQ(AF_SUCCESS, af_transpose(&outArray, inArray, false));
-    ASSERT_EQ(AF_SUCCESS, af_transpose_inplace(inArray, false));
+    ASSERT_SUCCESS(af_transpose(&outArray, inArray, false));
+    ASSERT_SUCCESS(af_transpose_inplace(inArray, false));
 
-    T *outData = new T[dims.elements()];
-    T *trsData = new T[dims.elements()];
-
-    ASSERT_EQ(AF_SUCCESS, af_get_data_ptr((void*)outData, outArray));
-    ASSERT_EQ(AF_SUCCESS, af_get_data_ptr((void*)trsData, inArray));
-
-    dim_t nElems = dims.elements();
-    for (int elIter = 0; elIter < (int)nElems; ++elIter) {
-        ASSERT_EQ(trsData[elIter] , outData[elIter])<< "at: " << elIter << std::endl;
-    }
+    ASSERT_ARRAYS_EQ(inArray, outArray);
 
     // cleanup
-    delete[] outData;
-    delete[] trsData;
-    ASSERT_EQ(AF_SUCCESS, af_release_array(inArray));
-    ASSERT_EQ(AF_SUCCESS, af_release_array(outArray));
+    ASSERT_SUCCESS(af_release_array(inArray));
+    ASSERT_SUCCESS(af_release_array(outArray));
 }
 
-#define INIT_TEST(Side, D3, D4)                                                     \
-    TYPED_TEST(Transpose, TranposeIP_##Side)                                        \
-    {                                                                               \
-        transposeip_test<TypeParam>(af::dim4(Side, Side, D3, D4));                  \
+#define INIT_TEST(Side, D3, D4)                                \
+    TYPED_TEST(Transpose, TranposeIP_##Side) {                 \
+        transposeip_test<TypeParam>(dim4(Side, Side, D3, D4)); \
     }
 
 INIT_TEST(10, 1, 1);
@@ -81,27 +71,12 @@ INIT_TEST(25, 2, 2);
 
 ////////////////////////////////////// CPP //////////////////////////////////
 //
-void transposeInPlaceCPPTest()
-{
-    if (noDoubleTests<float>()) return;
+void transposeInPlaceCPPTest() {
+    dim4 dims(64, 64, 1, 1);
 
-    af::dim4 dims(64, 64, 1,1);
-
-    af::array input = randu(dims);
-    af::array output = af::transpose(input);
+    array input  = randu(dims);
+    array output = transpose(input);
     transposeInPlace(input);
 
-    float *outData = new float[dims.elements()];
-    float *trsData = new float[dims.elements()];
-
-    output.host((void*)outData);
-    input.host((void*)trsData);
-
-    dim_t nElems = dims.elements();
-    for (int elIter = 0; elIter < (int)nElems; ++elIter) {
-        ASSERT_EQ(trsData[elIter], outData[elIter])<< "at: " << elIter << std::endl;
-    }
-
-    // cleanup
-    delete[] outData;
+    ASSERT_ARRAYS_EQ(input, output);
 }

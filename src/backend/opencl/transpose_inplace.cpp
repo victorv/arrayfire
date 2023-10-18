@@ -7,48 +7,44 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/dim4.hpp>
 #include <Array.hpp>
-#include <transpose.hpp>
+#include <common/half.hpp>
 #include <kernel/transpose_inplace.hpp>
+#include <transpose.hpp>
+#include <af/dim4.hpp>
 
 using af::dim4;
+using arrayfire::common::half;
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
 
 template<typename T>
-void transpose_inplace(Array<T> &in, const bool conjugate)
-{
-    dim4 iDims = in.dims();
+void transpose_inplace(Array<T> &in, const bool conjugate) {
+    const dim4 &inDims = in.dims();
 
-    if(conjugate) {
-        if(iDims[0] % kernel::TILE_DIM == 0 && iDims[1] % kernel::TILE_DIM == 0)
-            kernel::transpose_inplace<T, true, true>(in);
-        else
-            kernel::transpose_inplace<T, true, false>(in);
-    } else {
-        if(iDims[0] % kernel::TILE_DIM == 0 && iDims[1] % kernel::TILE_DIM == 0)
-            kernel::transpose_inplace<T, false, true>(in);
-        else
-            kernel::transpose_inplace<T, false, false>(in);
-    }
+    const bool is32multiple =
+        inDims[0] % kernel::TILE_DIM == 0 && inDims[1] % kernel::TILE_DIM == 0;
+
+    kernel::transpose_inplace<T>(in, getQueue(), conjugate, is32multiple);
 }
 
-#define INSTANTIATE(T)                                                          \
+#define INSTANTIATE(T) \
     template void transpose_inplace(Array<T> &in, const bool conjugate);
 
-INSTANTIATE(float  )
-INSTANTIATE(cfloat )
-INSTANTIATE(double )
+INSTANTIATE(float)
+INSTANTIATE(cfloat)
+INSTANTIATE(double)
 INSTANTIATE(cdouble)
-INSTANTIATE(char   )
-INSTANTIATE(int    )
-INSTANTIATE(uint   )
-INSTANTIATE(uchar  )
-INSTANTIATE(intl   )
-INSTANTIATE(uintl  )
-INSTANTIATE(short  )
-INSTANTIATE(ushort )
+INSTANTIATE(char)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(uchar)
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+INSTANTIATE(short)
+INSTANTIATE(ushort)
+INSTANTIATE(half)
 
-}
+}  // namespace opencl
+}  // namespace arrayfire

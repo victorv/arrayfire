@@ -9,8 +9,9 @@
 
 #pragma once
 
-typedef enum {
-    af_add_t = 0,
+enum af_op_t : int {
+    af_none_t = -1,
+    af_add_t  = 0,
     af_sub_t,
     af_mul_t,
     af_div_t,
@@ -29,6 +30,7 @@ typedef enum {
     af_bitxor_t,
     af_bitshiftl_t,
     af_bitshiftr_t,
+    af_bitnot_t,
 
     af_min_t,
     af_max_t,
@@ -75,7 +77,7 @@ typedef enum {
     af_ceil_t,
     af_round_t,
     af_trunc_t,
-    af_sign_t,
+    af_signbit_t,
 
     af_rem_t,
     af_mod_t,
@@ -91,5 +93,11 @@ typedef enum {
 
     af_sigmoid_t,
 
-    af_noop_t
-} af_op_t;
+    af_noop_t,
+
+    af_select_t,
+    af_not_select_t,
+    af_rsqrt_t,
+
+    af_moddims_t
+};

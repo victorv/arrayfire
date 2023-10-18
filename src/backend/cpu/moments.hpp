@@ -10,9 +10,9 @@
 #include <Array.hpp>
 #include <af/defines.h>
 
-namespace cpu
-{
-    template<typename T>
-    Array<float> moments(const Array<T> &in, const af_moment_type moment);
-}
-
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<float> moments(const Array<T> &in, const af_moment_type moment);
+}  // namespace cpu
+}  // namespace arrayfire

@@ -7,17 +7,14 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
 #include <Array.hpp>
-#include <graphics_common.hpp>
+#include <common/graphics_common.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    void copy_vector_field(const Array<T> &points, const Array<T> &directions,
-                           forge::VectorField* vector_field);
-}
+namespace arrayfire {
+namespace cpu {
 
-#endif
-
+template<typename T>
+void copy_vector_field(const Array<T> &points, const Array<T> &directions,
+                       fg_vector_field vfield);
+}  // namespace cpu
+}  // namespace arrayfire

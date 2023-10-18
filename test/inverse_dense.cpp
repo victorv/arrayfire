@@ -7,61 +7,86 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <gtest/gtest.h>
+// NOTE: Tests are known to fail on OSX when utilizing the CPU and OpenCL
+// backends for sizes larger than 128x128 or more. You can read more about it on
+// issue https://github.com/arrayfire/arrayfire/issues/1617
+
 #include <arrayfire.h>
-#include <af/dim4.hpp>
-#include <af/defines.h>
-#include <af/traits.hpp>
-#include <vector>
-#include <iostream>
-#include <complex>
-#include <string>
+#include <gtest/gtest.h>
 #include <testHelpers.hpp>
+#include <af/defines.h>
+#include <af/dim4.hpp>
+#include <af/traits.hpp>
+#include <complex>
+#include <iostream>
 
-using std::vector;
-using std::string;
-using std::cout;
-using std::endl;
-using std::abs;
-using af::cfloat;
+using af::array;
 using af::cdouble;
-
-///////////////////////////////// CPP ////////////////////////////////////
-//
+using af::cfloat;
+using af::dim4;
+using af::dtype;
+using af::dtype_traits;
+using af::identity;
+using af::matmul;
+using af::max;
+using std::abs;
 
 template<typename T>
-void inverseTester(const int m, const int n, const int k, double eps)
-{
-    if (noDoubleTests<T>()) return;
-    if (noLAPACKTests()) return;
+void inverseTester(const int m, const int n, double eps) {
+    SUPPORTED_TYPE_CHECK(T);
+    LAPACK_ENABLED_CHECK();
 #if 1
-    af::array A  = cpu_randu<T>(af::dim4(m, n));
+    array A = cpu_randu<T>(dim4(m, n));
 #else
-    af::array A  = af::randu(m, n, (af::dtype)af::dtype_traits<T>::af_type);
+    array A = randu(m, n, (dtype)dtype_traits<T>::af_type);
 #endif
 
     //! [ex_inverse]
-    af::array IA = inverse(A);
-    af::array I = af::matmul(A, IA);
+    array IA = inverse(A);
+    array I  = matmul(A, IA);
     //! [ex_inverse]
 
-    af::array I2 = af::identity(m, n, (af::dtype)af::dtype_traits<T>::af_type);
+    array I2 = identity(m, n, (dtype)dtype_traits<T>::af_type);
 
-    ASSERT_NEAR(0, af::max<double>(af::abs(real(I - I2))), eps);
-    ASSERT_NEAR(0, af::max<double>(af::abs(imag(I - I2))), eps);
+    ASSERT_NEAR(0, max<typename dtype_traits<T>::base_type>(abs(real(I - I2))),
+                eps);
+    ASSERT_NEAR(0, max<typename dtype_traits<T>::base_type>(abs(imag(I - I2))),
+                eps);
 }
 
-#define INVERSE_TESTS(T, eps)                   \
-    TEST(INVERSE, T##Square)                    \
-    {                                           \
-        inverseTester<T>(1000, 1000, 100, eps); \
-    }                                           \
-    TEST(INVERSE, T##SquareMultiple)            \
-    {                                           \
-        inverseTester<T>(2048, 2048, 512, eps); \
-    }                                           \
+template<typename T>
+class Inverse : public ::testing::Test {};
 
-INVERSE_TESTS(float, 0.01)
-INVERSE_TESTS(double, 1E-5)
-INVERSE_TESTS(cfloat, 0.01)
-INVERSE_TESTS(cdouble, 1E-5)
+template<typename T>
+double eps();
+
+template<>
+double eps<float>() {
+    return 0.01;
+}
+
+template<>
+double eps<double>() {
+    return 1e-5;
+}
+
+template<>
+double eps<cfloat>() {
+    return 0.015;
+}
+
+template<>
+double eps<cdouble>() {
+    return 1e-5;
+}
+
+typedef ::testing::Types<float, cfloat, double, cdouble> TestTypes;
+TYPED_TEST_SUITE(Inverse, TestTypes);
+
+TYPED_TEST(Inverse, Square) {
+    inverseTester<TypeParam>(1000, 1000, eps<TypeParam>());
+}
+
+TYPED_TEST(Inverse, SquareMultiplePowerOfTwo) {
+    inverseTester<TypeParam>(2048, 2048, eps<TypeParam>());
+}

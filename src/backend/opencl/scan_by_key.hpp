@@ -8,10 +8,12 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <ops.hpp>
+#include <optypes.hpp>
 
-namespace opencl
-{
-    template<af_op_t op, typename Ti, typename Tk, typename To>
-    Array<To> scan(const Array<Tk>& key, const Array<Ti>& in, const int dim, bool inclusive_scan = true);
-}
+namespace arrayfire {
+namespace opencl {
+template<af_op_t op, typename Ti, typename Tk, typename To>
+Array<To> scan(const Array<Tk>& key, const Array<Ti>& in, const int dim,
+               bool inclusive_scan = true);
+}  // namespace opencl
+}  // namespace arrayfire

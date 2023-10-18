@@ -9,10 +9,10 @@
 
 #include <Array.hpp>
 
-namespace opencl
-{
-
-template<typename T, typename convT, typename cT, bool isDouble, bool roundOut, dim_t baseDim>
-Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter, const bool expand, AF_BATCH_KIND kind);
-
-}
+namespace arrayfire {
+namespace opencl {
+template<typename T>
+Array<T> fftconvolve(Array<T> const& signal, Array<T> const& filter,
+                     const bool expand, AF_BATCH_KIND kind, const int rank);
+}  // namespace opencl
+}  // namespace arrayfire

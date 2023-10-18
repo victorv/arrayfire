@@ -8,190 +8,96 @@
  ********************************************************/
 
 #include <memory.hpp>
+
+#include <common/DefaultMemoryManager.hpp>
+#include <common/Logger.hpp>
+#include <common/half.hpp>
 #include <err_cpu.hpp>
-#include <types.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
-#include <memory>
-#include <MemoryManager.hpp>
+#include <spdlog/spdlog.h>
+#include <types.hpp>
+#include <af/dim4.hpp>
 
-#ifndef AF_MEM_DEBUG
-#define AF_MEM_DEBUG 0
-#endif
+#include <utility>
 
-#ifndef AF_CPU_MEM_DEBUG
-#define AF_CPU_MEM_DEBUG 0
-#endif
+using af::dim4;
+using arrayfire::common::bytesToString;
+using arrayfire::common::half;
+using std::function;
+using std::move;
+using std::unique_ptr;
 
-namespace cpu
-{
-
-class MemoryManager  : public common::MemoryManager
-{
-    int getActiveDeviceId();
-    size_t getMaxMemorySize(int id);
-public:
-    MemoryManager();
-    void *nativeAlloc(const size_t bytes);
-    void nativeFree(void *ptr);
-    ~MemoryManager()
-    {
-        common::lock_guard_t lock(this->memory_mutex);
-        for (int n = 0; n < getDeviceCount(); n++) {
-            cpu::setDevice(n);
-            this->garbageCollect();
-        }
-    }
-};
-
-int MemoryManager::getActiveDeviceId()
-{
-    return cpu::getActiveDeviceId();
+namespace arrayfire {
+namespace cpu {
+float getMemoryPressure() { return memoryManager().getMemoryPressure(); }
+float getMemoryPressureThreshold() {
+    return memoryManager().getMemoryPressureThreshold();
 }
 
-size_t MemoryManager::getMaxMemorySize(int id)
-{
-    return cpu::getDeviceMemorySize(id);
+bool jitTreeExceedsMemoryPressure(size_t bytes) {
+    return memoryManager().jitTreeExceedsMemoryPressure(bytes);
 }
 
-MemoryManager::MemoryManager() :
-    common::MemoryManager(getDeviceCount(), common::MAX_BUFFERS, AF_MEM_DEBUG || AF_CPU_MEM_DEBUG)
-{
-    this->setMaxMemorySize();
+void setMemStepSize(size_t step_bytes) {
+    memoryManager().setMemStepSize(step_bytes);
 }
 
+size_t getMemStepSize() { return memoryManager().getMemStepSize(); }
 
-void *MemoryManager::nativeAlloc(const size_t bytes)
-{
-    void *ptr = malloc(bytes);
-    if (!ptr) AF_ERROR("Unable to allocate memory", AF_ERR_NO_MEM);
-    return ptr;
-}
+void signalMemoryCleanup() { memoryManager().signalMemoryCleanup(); }
 
-void MemoryManager::nativeFree(void *ptr)
-{
-    return free((void *)ptr);
-}
+void shutdownMemoryManager() { memoryManager().shutdown(); }
 
-static MemoryManager &getMemoryManager()
-{
-    static MemoryManager instance;
-    return instance;
-}
-
-void setMemStepSize(size_t step_bytes)
-{
-    getMemoryManager().setMemStepSize(step_bytes);
-}
-
-size_t getMemStepSize(void)
-{
-    return getMemoryManager().getMemStepSize();
-}
-
-size_t getMaxBytes()
-{
-    return getMemoryManager().getMaxBytes();
-}
-
-unsigned getMaxBuffers()
-{
-    return getMemoryManager().getMaxBuffers();
-}
-
-void garbageCollect()
-{
-    getMemoryManager().garbageCollect();
-}
-
-void printMemInfo(const char *msg, const int device)
-{
-    getMemoryManager().printInfo(msg, device);
+void printMemInfo(const char *msg, const int device) {
+    memoryManager().printInfo(msg, device);
 }
 
 template<typename T>
-T* memAlloc(const size_t &elements)
-{
-    T *ptr = nullptr;
+unique_ptr<T[], function<void(void *)>> memAlloc(const size_t &elements) {
+    // TODO: make memAlloc aware of array shapes
+    dim4 dims(elements);
+    T *ptr = static_cast<T *>(
+        memoryManager().alloc(false, 1, dims.get(), sizeof(T)));
+    return unique_ptr<T[], function<void(void *)>>(ptr, memFree);
+}
 
-    try {
-        ptr = (T *)getMemoryManager().alloc(elements * sizeof(T), false);
-    } catch(...) {
-        getQueue().sync();
-        ptr = (T *)getMemoryManager().alloc(elements * sizeof(T), false);
-    }
+void *memAllocUser(const size_t &bytes) {
+    dim4 dims(bytes);
+    void *ptr = memoryManager().alloc(true, 1, dims.get(), 1);
     return ptr;
 }
 
-void* memAllocUser(const size_t &bytes)
-{
-    void *ptr = nullptr;
+void memFree(void *ptr) { return memoryManager().unlock(ptr, false); }
 
-    try {
-        ptr = getMemoryManager().alloc(bytes, true);
-    } catch(...) {
-        getQueue().sync();
-        ptr = getMemoryManager().alloc(bytes, true);
-    }
-    return ptr;
-}
+void memFreeUser(void *ptr) { memoryManager().unlock(ptr, true); }
 
-template<typename T>
-void memFree(T *ptr)
-{
-    return getMemoryManager().unlock((void *)ptr, false);
-}
+void memLock(const void *ptr) { memoryManager().userLock(ptr); }
 
-void memFreeUser(void *ptr)
-{
-    getMemoryManager().unlock((void *)ptr, true);
-}
+bool isLocked(const void *ptr) { return memoryManager().isUserLocked(ptr); }
 
-void memLock(const void *ptr)
-{
-    getMemoryManager().userLock((void *)ptr);
-}
-
-bool isLocked(const void *ptr)
-{
-    return getMemoryManager().isUserLocked((void *)ptr);
-}
-
-void memUnlock(const void *ptr)
-{
-    getMemoryManager().userUnlock((void *)ptr);
-}
+void memUnlock(const void *ptr) { memoryManager().userUnlock(ptr); }
 
 void deviceMemoryInfo(size_t *alloc_bytes, size_t *alloc_buffers,
-                      size_t *lock_bytes,  size_t *lock_buffers)
-{
-    getQueue().sync();
-    getMemoryManager().bufferInfo(alloc_bytes, alloc_buffers,
-                                  lock_bytes,  lock_buffers);
+                      size_t *lock_bytes, size_t *lock_buffers) {
+    memoryManager().usageInfo(alloc_bytes, alloc_buffers, lock_bytes,
+                              lock_buffers);
 }
 
 template<typename T>
-T* pinnedAlloc(const size_t &elements)
-{
-    return (T *)getMemoryManager().alloc(elements * sizeof(T), false);
+T *pinnedAlloc(const size_t &elements) {
+    // TODO: make pinnedAlloc aware of array shapes
+    dim4 dims(elements);
+    void *ptr = memoryManager().alloc(false, 1, dims.get(), sizeof(T));
+    return static_cast<T *>(ptr);
 }
 
-template<typename T>
-void pinnedFree(T* ptr)
-{
-    return getMemoryManager().unlock((void *)ptr, false);
-}
+void pinnedFree(void *ptr) { memoryManager().unlock(ptr, false); }
 
-bool checkMemoryLimit()
-{
-    return getMemoryManager().checkMemoryLimit();
-}
-
-#define INSTANTIATE(T)                                      \
-    template T* memAlloc(const size_t &elements);           \
-    template void memFree(T* ptr);                          \
-    template T* pinnedAlloc(const size_t &elements);        \
-    template void pinnedFree(T* ptr);                       \
+#define INSTANTIATE(T)                                                   \
+    template std::unique_ptr<T[], std::function<void(void *)>> memAlloc( \
+        const size_t &elements);                                         \
+    template T *pinnedAlloc(const size_t &elements);
 
 INSTANTIATE(float)
 INSTANTIATE(cfloat)
@@ -204,6 +110,51 @@ INSTANTIATE(uchar)
 INSTANTIATE(intl)
 INSTANTIATE(uintl)
 INSTANTIATE(ushort)
-INSTANTIATE(short )
+INSTANTIATE(short)
+INSTANTIATE(half)
 
+template<>
+void *pinnedAlloc<void>(const size_t &elements) {
+    // TODO: make pinnedAlloc aware of array shapes
+    dim4 dims(elements);
+    void *ptr = memoryManager().alloc(false, 1, dims.get(), 1);
+    return ptr;
 }
+
+Allocator::Allocator() { logger = common::loggerFactory("mem"); }
+
+void Allocator::shutdown() {
+    for (int n = 0; n < cpu::getDeviceCount(); n++) {
+        try {
+            cpu::setDevice(n);
+            shutdownMemoryManager();
+        } catch (const AfError &err) {
+            continue;  // Do not throw any errors while shutting down
+        }
+    }
+}
+
+int Allocator::getActiveDeviceId() {
+    return static_cast<int>(cpu::getActiveDeviceId());
+}
+
+size_t Allocator::getMaxMemorySize(int id) {
+    return cpu::getDeviceMemorySize(id);
+}
+
+void *Allocator::nativeAlloc(const size_t bytes) {
+    void *ptr = malloc(bytes);  // NOLINT(hicpp-no-malloc)
+    AF_TRACE("nativeAlloc: {:>7} {}", bytesToString(bytes), ptr);
+    if (!ptr) { AF_ERROR("Unable to allocate memory", AF_ERR_NO_MEM); }
+    return ptr;
+}
+
+void Allocator::nativeFree(void *ptr) {
+    AF_TRACE("nativeFree: {: >8} {}", " ", ptr);
+    // Make sure this pointer is not being used on the queue before freeing the
+    // memory.
+    getQueue().sync();
+    free(ptr);  // NOLINT(hicpp-no-malloc)
+}
+}  // namespace cpu
+}  // namespace arrayfire

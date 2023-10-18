@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    Array<T> reorder(const Array<T> &in, const af::dim4 &rdims);
-}
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<T> reorder(const Array<T> &in, const af::dim4 &rdims);
+}  // namespace cpu
+}  // namespace arrayfire

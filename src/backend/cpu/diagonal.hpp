@@ -8,13 +8,13 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <ops.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    Array<T> diagCreate(const Array<T> &in, const int num);
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<T> diagCreate(const Array<T> &in, const int num);
 
-    template<typename T>
-    Array<T> diagExtract(const Array<T> &in, const int num);
-}
+template<typename T>
+Array<T> diagExtract(const Array<T> &in, const int num);
+}  // namespace cpu
+}  // namespace arrayfire

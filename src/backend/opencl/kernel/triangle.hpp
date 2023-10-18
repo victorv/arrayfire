@@ -8,92 +8,65 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/triangle.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/half.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <types.hpp>
+#include <kernel_headers/triangle.hpp>
 #include <math.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
-using af::scalar_to_option;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace kernel
-{
+template<typename T>
+void triangle(Param out, const Param in, bool is_upper, bool is_unit_diag) {
+    using arrayfire::opencl::scalar_to_option;
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::string;
+    using std::vector;
 
-// Kernel Launch Config Values
-static const unsigned TX = 32;
-static const unsigned TY = 8;
-static const unsigned TILEX = 128;
-static const unsigned TILEY = 32;
+    constexpr unsigned TX    = 32;
+    constexpr unsigned TY    = 8;
+    constexpr unsigned TILEX = 128;
+    constexpr unsigned TILEY = 32;
 
-template<typename T, bool is_upper, bool is_unit_diag>
-void triangle(Param out, const Param in)
-{
-    try {
-        static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-        static std::map<int, Program*>  trgProgs;
-        static std::map<int, Kernel*> trgKernels;
+    vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(),
+        TemplateArg(is_upper),
+        TemplateArg(is_unit_diag),
+    };
+    vector<string> compileOpts = {
+        DefineValue(is_upper),
+        DefineValue(is_unit_diag),
+        DefineKeyValue(ZERO, scalar_to_option(scalar<T>(0))),
+        DefineKeyValue(ONE, scalar_to_option(scalar<T>(1))),
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
 
-        int device = getActiveDeviceId();
+    auto triangle = common::getKernel("triangle", {{triangle_cl_src}},
+                                      tmpltArgs, compileOpts);
 
-        std::call_once(compileFlags[device], [device] () {
+    NDRange local(TX, TY);
 
-                std::ostringstream options;
-                options << " -D T=" << dtype_traits<T>::getName()
-                        << " -D is_upper=" << is_upper
-                        << " -D is_unit_diag=" << is_unit_diag
-                        << " -D ZERO=(T)(" << scalar_to_option(scalar<T>(0)) << ")"
-                        << " -D ONE=(T)(" << scalar_to_option(scalar<T>(1)) << ")";
+    int groups_x = divup(out.info.dims[0], TILEX);
+    int groups_y = divup(out.info.dims[1], TILEY);
 
-                if (std::is_same<T, double>::value ||
-                    std::is_same<T, cdouble>::value) {
-                    options << " -D USE_DOUBLE";
-                }
+    NDRange global(groups_x * out.info.dims[2] * local[0],
+                   groups_y * out.info.dims[3] * local[1]);
 
-                cl::Program prog;
-                buildProgram(prog, triangle_cl, triangle_cl_len, options.str());
-                trgProgs[device] = new Program(prog);
-
-                trgKernels[device] = new Kernel(*trgProgs[device], "triangle_kernel");
-            });
-
-        NDRange local(TX, TY);
-
-        int groups_x = divup(out.info.dims[0], TILEX);
-        int groups_y = divup(out.info.dims[1], TILEY);
-
-        NDRange global(groups_x * out.info.dims[2] * local[0],
-                       groups_y * out.info.dims[3] * local[1]);
-
-        auto triangleOp = KernelFunctor<Buffer, KParam,
-                                      const Buffer, KParam,
-                                      const int, const int> (*trgKernels[device]);
-
-        triangleOp(EnqueueArgs(getQueue(), global, local),
-                    *out.data, out.info, *in.data, in.info, groups_x, groups_y);
-
-        CL_DEBUG_FINISH(getQueue());
-    } catch (cl::Error err) {
-        CL_TO_AF_ERROR(err);
-        throw;
-    }
+    triangle(EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+             *in.data, in.info, groups_x, groups_y);
+    CL_DEBUG_FINISH(getQueue());
 }
-
-}
-
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

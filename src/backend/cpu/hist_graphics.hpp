@@ -9,18 +9,14 @@
 
 #pragma once
 
-#if defined (WITH_GRAPHICS)
-
-#include <graphics_common.hpp>
 #include <Array.hpp>
+#include <common/graphics_common.hpp>
 
-namespace cpu
-{
+namespace arrayfire {
+namespace cpu {
 
 template<typename T>
-void copy_histogram(const Array<T> &data, const forge::Histogram* hist);
+void copy_histogram(const Array<T> &data, fg_histogram hist);
 
-}
-
-#endif
-
+}  // namespace cpu
+}  // namespace arrayfire

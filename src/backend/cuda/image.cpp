@@ -10,56 +10,61 @@
 // Parts of this code sourced from SnopyDogy
 // https://gist.github.com/SnopyDogy/a9a22497a893ec86aa3e
 
-#if defined(WITH_GRAPHICS)
-
 #include <Array.hpp>
-#include <image.hpp>
-#include <err_cuda.hpp>
+#include <GraphicsResourceManager.hpp>
 #include <debug_cuda.hpp>
-#include <interopManager.hpp>
+#include <device_manager.hpp>
+#include <err_cuda.hpp>
+#include <image.hpp>
 
 using af::dim4;
+using arrayfire::common::ForgeManager;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
 
-namespace cuda
-{
-using namespace gl;
+namespace arrayfire {
+namespace cuda {
 
 template<typename T>
-void copy_image(const Array<T> &in, const forge::Image* image)
-{
-    if(InteropManager::checkGraphicsInteropCapability()) {
-        InteropManager& intrpMngr = InteropManager::getInstance();
-
-        cudaGraphicsResource_t *resources = intrpMngr.getBufferResource(image);
+void copy_image(const Array<T> &in, fg_image image) {
+    auto stream = getActiveStream();
+    if (DeviceManager::checkGraphicsInteropCapability()) {
+        auto res = interopManager().getImageResources(image);
 
         const T *d_X = in.get();
-        // Map resource. Copy data to pixels. Unmap resource.
-        size_t num_bytes;
-        T* d_pixels = NULL;
-        cudaGraphicsMapResources(1, resources, cuda::getStream(cuda::getActiveDeviceId()));
-        cudaGraphicsResourceGetMappedPointer((void **)&d_pixels, &num_bytes, resources[0]);
-        cudaMemcpyAsync(d_pixels, d_X, num_bytes, cudaMemcpyDeviceToDevice,
-                        cuda::getStream(cuda::getActiveDeviceId()));
-        cudaGraphicsUnmapResources(1, resources, cuda::getStream(cuda::getActiveDeviceId()));
+        size_t bytes = 0;
+        T *d_pixels  = NULL;
+        cudaGraphicsMapResources(1, res[0].get(), stream);
+        cudaGraphicsResourceGetMappedPointer((void **)&d_pixels, &bytes,
+                                             *(res[0].get()));
+        cudaMemcpyAsync(d_pixels, d_X, bytes, cudaMemcpyDeviceToDevice, stream);
+        cudaGraphicsUnmapResources(1, res[0].get(), stream);
 
         POST_LAUNCH_CHECK();
         CheckGL("After cuda resource copy");
     } else {
+        ForgeModule &_ = common::forgePlugin();
         CheckGL("Begin CUDA fallback-resource copy");
-        glBindBuffer((gl::GLenum)GL_PIXEL_UNPACK_BUFFER, image->pixels());
-        glBufferData((gl::GLenum)GL_PIXEL_UNPACK_BUFFER, image->size(), 0, (gl::GLenum)GL_STREAM_DRAW);
-        gl::GLubyte* ptr = (gl::GLubyte*)glMapBuffer((gl::GLenum)GL_PIXEL_UNPACK_BUFFER, (gl::GLenum)GL_WRITE_ONLY);
+        unsigned data_size = 0, buffer = 0;
+        FG_CHECK(_.fg_get_image_size(&data_size, image));
+        FG_CHECK(_.fg_get_pixel_buffer(&buffer, image));
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, data_size, 0, GL_STREAM_DRAW);
+        auto *ptr = static_cast<GLubyte *>(
+            glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
         if (ptr) {
-            CUDA_CHECK(cudaMemcpy(ptr, in.get(), image->size(), cudaMemcpyDeviceToHost));
-            glUnmapBuffer((gl::GLenum)GL_PIXEL_UNPACK_BUFFER);
+            CUDA_CHECK(cudaMemcpyAsync(ptr, in.get(), data_size,
+                                       cudaMemcpyDeviceToHost, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
+            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
         }
-        glBindBuffer((gl::GLenum)GL_PIXEL_UNPACK_BUFFER, 0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         CheckGL("End CUDA fallback-resource copy");
     }
 }
 
-#define INSTANTIATE(T)      \
-    template void copy_image<T>(const Array<T> &in, const forge::Image* image);
+#define INSTANTIATE(T) template void copy_image<T>(const Array<T> &, fg_image);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -70,6 +75,5 @@ INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
 
-}
-
-#endif
+}  // namespace cuda
+}  // namespace arrayfire

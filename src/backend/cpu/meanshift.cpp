@@ -7,48 +7,53 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <af/dim4.hpp>
 #include <Array.hpp>
-#include <meanshift.hpp>
-#include <cmath>
-#include <algorithm>
 #include <err_cpu.hpp>
+#include <kernel/meanshift.hpp>
 #include <math.hpp>
+#include <meanshift.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
-#include <kernel/meanshift.hpp>
+#include <af/dim4.hpp>
+#include <algorithm>
+#include <cmath>
 
 using af::dim4;
 using std::vector;
 
-namespace cpu
-{
-
-template<typename T, bool is_color>
-Array<T>  meanshift(const Array<T> &in, const float &s_sigma, const float &c_sigma, const unsigned iter)
-{
-    in.eval();
-
+namespace arrayfire {
+namespace cpu {
+template<typename T>
+Array<T> meanshift(const Array<T> &in, const float &spatialSigma,
+                   const float &chromaticSigma, const unsigned &numIterations,
+                   const bool &isColor) {
     Array<T> out = createEmptyArray<T>(in.dims());
 
-    getQueue().enqueue(kernel::meanShift<T, is_color>, out, in, s_sigma, c_sigma, iter);
+    if (isColor) {
+        getQueue().enqueue(kernel::meanShift<T, true>, out, in, spatialSigma,
+                           chromaticSigma, numIterations);
+    } else {
+        getQueue().enqueue(kernel::meanShift<T, false>, out, in, spatialSigma,
+                           chromaticSigma, numIterations);
+    }
 
     return out;
 }
 
-#define INSTANTIATE(T) \
-    template Array<T>  meanshift<T, true >(const Array<T> &in, const float &s_sigma, const float &c_sigma, const unsigned iter); \
-    template Array<T>  meanshift<T, false>(const Array<T> &in, const float &s_sigma, const float &c_sigma, const unsigned iter);
+#define INSTANTIATE(T)                                              \
+    template Array<T> meanshift<T>(const Array<T> &, const float &, \
+                                   const float &, const unsigned &, \
+                                   const bool &);
 
-INSTANTIATE(float )
+INSTANTIATE(float)
 INSTANTIATE(double)
-INSTANTIATE(char  )
-INSTANTIATE(int   )
-INSTANTIATE(uint  )
-INSTANTIATE(uchar )
-INSTANTIATE(short )
+INSTANTIATE(char)
+INSTANTIATE(int)
+INSTANTIATE(uint)
+INSTANTIATE(uchar)
+INSTANTIATE(short)
 INSTANTIATE(ushort)
-INSTANTIATE(intl  )
-INSTANTIATE(uintl )
-
-}
+INSTANTIATE(intl)
+INSTANTIATE(uintl)
+}  // namespace cpu
+}  // namespace arrayfire

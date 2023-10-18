@@ -7,76 +7,50 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <kernel_headers/identity.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <dispatch.hpp>
+#pragma once
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/half.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <map>
-#include <mutex>
+#include <kernel/config.hpp>
+#include <kernel_headers/identity.hpp>
 #include <math.hpp>
-#include "config.hpp"
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
-using std::ostringstream;
-using af::scalar_to_option;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-namespace kernel
-{
+template<typename T>
+static void identity(Param out) {
+    std::array<TemplateArg, 1> targs = {
+        TemplateTypename<T>(),
+    };
+    std::array<std::string, 4> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(ONE, scalar_to_option(scalar<T>(1))),
+        DefineKeyValue(ZERO, scalar_to_option(scalar<T>(0))),
+        getTypeBuildDefinition<T>()};
 
-    template<typename T>
-    static void identity(Param out)
-    {
-        try {
-            static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-            static std::map<int, Program*>   identityProgs;
-            static std::map<int, Kernel*>  identityKernels;
+    auto identityOp = common::getKernel("identity_kernel", {{identity_cl_src}},
+                                        targs, options);
 
-            int device = getActiveDeviceId();
+    cl::NDRange local(32, 8);
+    int groups_x = divup(out.info.dims[0], local[0]);
+    int groups_y = divup(out.info.dims[1], local[1]);
+    cl::NDRange global(groups_x * out.info.dims[2] * local[0],
+                       groups_y * out.info.dims[3] * local[1]);
 
-            std::call_once( compileFlags[device], [device] () {
-                    ostringstream options;
-                    options << " -D T="    << dtype_traits<T>::getName()
-                            << " -D ONE=(T)("  << scalar_to_option(scalar<T>(1)) << ")"
-                            << " -D ZERO=(T)(" << scalar_to_option(scalar<T>(0)) << ")";
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, identity_cl, identity_cl_len, options.str());
-                    identityProgs[device]   = new Program(prog);
-                    identityKernels[device] = new Kernel(*identityProgs[device], "identity_kernel");
-                });
-
-            NDRange local(32, 8);
-            int groups_x = divup(out.info.dims[0], local[0]);
-            int groups_y = divup(out.info.dims[1], local[1]);
-            NDRange global(groups_x * out.info.dims[2] * local[0],
-                           groups_y * out.info.dims[3] * local[1]);
-
-            auto identityOp = KernelFunctor<Buffer, const KParam,
-                                          int, int> (*identityKernels[device]);
-
-            identityOp(EnqueueArgs(getQueue(), global, local),
-                       *(out.data), out.info, groups_x, groups_y);
-            CL_DEBUG_FINISH(getQueue());
-
-        } catch (cl::Error err) {
-            CL_TO_AF_ERROR(err);
-        }
-    }
-
+    identityOp(cl::EnqueueArgs(getQueue(), global, local), *(out.data),
+               out.info, groups_x, groups_y);
+    CL_DEBUG_FINISH(getQueue());
 }
 
-}
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

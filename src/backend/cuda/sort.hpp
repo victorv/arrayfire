@@ -9,8 +9,9 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T>
-    Array<T> sort(const Array<T> &in, const unsigned dim, bool isAscending);
-}
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+Array<T> sort(const Array<T> &in, const unsigned dim, bool isAscending);
+}  // namespace cuda
+}  // namespace arrayfire

@@ -8,126 +8,73 @@
  ********************************************************/
 
 #pragma once
-#pragma once
-#include <kernel_headers/csrmm.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
-#include <cache.hpp>
-#include <type_util.hpp>
-#include "scan_dim.hpp"
-#include "reduce.hpp"
-#include "scan_first.hpp"
-#include "config.hpp"
+#include <kernel/config.hpp>
+#include <kernel/reduce.hpp>
+#include <kernel/scan_dim.hpp>
+#include <kernel/scan_first.hpp>
+#include <kernel_headers/csrmm.hpp>
+#include <traits.hpp>
+#include <af/opencl.h>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-    namespace kernel
-    {
-        static const int MAX_CSRMM_GROUPS = 4096;
-        template<typename T>
-        void csrmm_nt(Param out,
-                      const Param &values, const Param &rowIdx, const Param &colIdx,
-                      const Param &rhs, const T alpha, const T beta)
-        {
-            try {
-                bool use_alpha = (alpha != scalar<T>(1.0));
-                bool use_beta = (beta != scalar<T>(0.0));
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
+template<typename T>
+void csrmm_nt(Param out, const Param &values, const Param &rowIdx,
+              const Param &colIdx, const Param &rhs, const T alpha,
+              const T beta) {
+    constexpr int MAX_CSRMM_GROUPS = 4096;
+    // Using greedy indexing is causing performance issues on many platforms
+    // FIXME: Figure out why
+    constexpr bool use_greedy = false;
 
-                // Using greedy indexing is causing performance issues on many platforms
-                // FIXME: Figure out why
-                bool use_greedy = false;
+    const bool use_alpha = (alpha != scalar<T>(1.0));
+    const bool use_beta  = (beta != scalar<T>(0.0));
 
-                std::string ref_name =
-                    std::string("csrmm_nt_") +
-                    std::string(dtype_traits<T>::getName()) +
-                    std::string("_") +
-                    std::to_string(use_alpha) +
-                    std::string("_") +
-                    std::to_string(use_beta) +
-                    std::string("_") +
-                    std::to_string(use_greedy);
+    std::array<TemplateArg, 4> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(use_alpha),
+        TemplateArg(use_beta),
+        TemplateArg(use_greedy),
+    };
+    std::array<std::string, 7> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(USE_ALPHA, use_alpha),
+        DefineKeyValue(USE_BETA, use_beta),
+        DefineKeyValue(USE_GREEDY, use_greedy),
+        DefineValue(THREADS_PER_GROUP),
+        DefineKeyValue(IS_CPLX, (iscplx<T>() ? 1 : 0)),
+        getTypeBuildDefinition<T>()};
 
-                int device = getActiveDeviceId();
-                auto idx = kernelCaches[device].find(ref_name);
-                kc_entry_t entry;
+    // FIXME: Switch to perf (thread vs block) baesd kernel
+    auto csrmm_nt_func =
+        common::getKernel("csrmm_nt", {{csrmm_cl_src}}, targs, options);
 
-                if (idx == kernelCaches[device].end()) {
+    cl::NDRange local(THREADS_PER_GROUP, 1);
+    int M = rowIdx.info.dims[0] - 1;
+    int N = rhs.info.dims[0];
 
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    options << " -D USE_ALPHA=" << use_alpha;
-                    options << " -D USE_BETA=" << use_beta;
-                    options << " -D USE_GREEDY=" << use_greedy;
-                    options << " -D THREADS_PER_GROUP=" << THREADS_PER_GROUP;
+    int groups_x = divup(N, local[0]);
+    int groups_y = divup(M, REPEAT);
+    groups_y     = std::min(groups_y, MAX_CSRMM_GROUPS);
+    cl::NDRange global(local[0] * groups_x, local[1] * groups_y);
 
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    if (std::is_same<T, cfloat>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D IS_CPLX=1";
-                    } else {
-                        options << " -D IS_CPLX=0";
-                    }
+    cl::Buffer *counter = bufferAlloc(groups_x * sizeof(int));
+    getQueue().enqueueFillBuffer(*counter, 0, 0, groups_x * sizeof(int));
 
-                    const char *ker_strs[] = {csrmm_cl};
-                    const int   ker_lens[] = {csrmm_cl_len};
-
-                    Program prog;
-                    buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-                    entry.prog = new Program(prog);
-                    entry.ker  = new Kernel[2];
-                    entry.ker[0] = Kernel(*entry.prog, "csrmm_nt");
-                    // FIXME: Change this after adding another kernel
-                    entry.ker[1] = Kernel(*entry.prog, "csrmm_nt");
-                } else {
-                    entry = idx->second;
-                }
-
-                auto csrmm_nt_kernel = entry.ker[0];
-                auto csrmm_nt_func = KernelFunctor<Buffer,
-                                                   Buffer, Buffer, Buffer,
-                                                   int, int,
-                                                   Buffer, KParam, T, T, Buffer>(csrmm_nt_kernel);
-                NDRange local(THREADS_PER_GROUP, 1);
-                int M = rowIdx.info.dims[0] - 1;
-                int N = rhs.info.dims[0];
-
-                int groups_x = divup(N, local[0]);
-                int groups_y = divup(M, REPEAT);
-                groups_y = std::min(groups_y, MAX_CSRMM_GROUPS);
-                NDRange global(local[0] * groups_x, local[1] * groups_y);
-
-                std::vector<int> count(groups_x);
-                cl::Buffer *counter = bufferAlloc(count.size() * sizeof(int));
-                getQueue().enqueueWriteBuffer(*counter, CL_TRUE,
-                                              0,
-                                              count.size() * sizeof(int),
-                                              (void *)count.data());
-
-                csrmm_nt_func(EnqueueArgs(getQueue(), global, local),
-                              *out.data, *values.data, *rowIdx.data, *colIdx.data,
-                              M, N, *rhs.data, rhs.info, alpha, beta, *counter);
-
-                bufferFree(counter);
-            } catch (cl::Error &ex) {
-                CL_TO_AF_ERROR(ex);
-            }
-        }
-    }
+    csrmm_nt_func(cl::EnqueueArgs(getQueue(), global, local), *out.data,
+                  *values.data, *rowIdx.data, *colIdx.data, M, N, *rhs.data,
+                  rhs.info, alpha, beta, *counter);
+    bufferFree(counter);
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire

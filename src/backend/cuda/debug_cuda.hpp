@@ -8,55 +8,67 @@
  ********************************************************/
 
 #pragma once
-#include <platform.hpp>
+#include <common/Logger.hpp>
 #include <err_cuda.hpp>
-#include <thrust/version.h>
-#include <thrust/system/cuda/detail/par.h>
+#include <platform.hpp>
+#include <string>
 
-#define THRUST_STREAM thrust::cuda::par.on(cuda::getStream(cuda::getActiveDeviceId()))
+namespace arrayfire {
+namespace cuda {
+namespace kernel_logger {
 
-#if THRUST_MAJOR_VERSION>=1 && THRUST_MINOR_VERSION>=8
+inline auto getLogger() {
+    static auto logger = common::loggerFactory("kernel");
+    return logger;
+}
+}  // namespace kernel_logger
+}  // namespace cuda
+}  // namespace arrayfire
 
-#define THRUST_SELECT(fn, ...) fn(THRUST_STREAM, __VA_ARGS__)
-#define THRUST_SELECT_OUT(res, fn, ...) res = fn(THRUST_STREAM, __VA_ARGS__)
+template<>
+struct fmt::formatter<dim3> : fmt::formatter<std::string> {
+    // parse is inherited from formatter<string_view>.
+    template<typename FormatContext>
+    auto format(dim3 c, FormatContext& ctx) {
+        std::string name = fmt::format("{} {} {}", c.x, c.y, c.z);
+        return formatter<std::string>::format(name, ctx);
+    }
+};
 
-#else
-
-#define THRUST_SELECT(fn, ...) \
-    do {                          \
-        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId()))); \
-        fn(__VA_ARGS__);       \
-    } while(0)
-
-#define THRUST_SELECT_OUT(res, fn, ...) \
-    do {                          \
-        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId()))); \
-        res = fn(__VA_ARGS__);       \
-    } while(0)
-
-#endif
-
-#define CUDA_LAUNCH_SMEM(fn, blks, thrds, smem_size, ...) \
-	fn<<<blks, thrds, smem_size, cuda::getStream(cuda::getActiveDeviceId())>>>(__VA_ARGS__)
+#define CUDA_LAUNCH_SMEM(fn, blks, thrds, smem_size, ...)                   \
+    do {                                                                    \
+        {                                                                   \
+            using namespace arrayfire::cuda::kernel_logger;                 \
+            AF_TRACE(                                                       \
+                "Launching {}: Blocks: [{}] Threads: [{}] "                 \
+                "Shared Memory: {}",                                        \
+                #fn, blks, thrds, smem_size);                               \
+        }                                                                   \
+        fn<<<blks, thrds, smem_size, arrayfire::cuda::getActiveStream()>>>( \
+            __VA_ARGS__);                                                   \
+    } while (false)
 
 #define CUDA_LAUNCH(fn, blks, thrds, ...) \
-	CUDA_LAUNCH_SMEM(fn, blks, thrds, 0, __VA_ARGS__)
+    CUDA_LAUNCH_SMEM(fn, blks, thrds, 0, __VA_ARGS__)
 
 // FIXME: Add a special flag for debug
 #ifndef NDEBUG
 
-#define POST_LAUNCH_CHECK() do {                        \
-        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId()))); \
-    } while(0)                                          \
+#define POST_LAUNCH_CHECK()                                                    \
+    do {                                                                       \
+        CUDA_CHECK(cudaStreamSynchronize(arrayfire::cuda::getActiveStream())); \
+    } while (0)
 
 #else
 
-#define POST_LAUNCH_CHECK() do {                                        \
-    if(cuda::synchronize_calls()) {                                     \
-        CUDA_CHECK(cudaStreamSynchronize(cuda::getStream(cuda::getActiveDeviceId()))); \
-    } else {                                                            \
-        CUDA_CHECK(cudaPeekAtLastError());                              \
-    }                                                                   \
-  } while(0)                                                            \
+#define POST_LAUNCH_CHECK()                                                 \
+    do {                                                                    \
+        if (arrayfire::cuda::synchronize_calls()) {                         \
+            CUDA_CHECK(                                                     \
+                cudaStreamSynchronize(arrayfire::cuda::getActiveStream())); \
+        } else {                                                            \
+            CUDA_CHECK(cudaPeekAtLastError());                              \
+        }                                                                   \
+    } while (0)
 
 #endif

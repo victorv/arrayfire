@@ -9,11 +9,12 @@
 
 #include <Array.hpp>
 
-namespace cuda
-{
-    template<typename T>
-    void qr(Array<T> &q, Array<T> &r, Array<T> &t, const Array<T> &in);
+namespace arrayfire {
+namespace cuda {
+template<typename T>
+void qr(Array<T> &q, Array<T> &r, Array<T> &t, const Array<T> &in);
 
-    template<typename T>
-    Array<T> qr_inplace(Array<T> &in);
-}
+template<typename T>
+Array<T> qr_inplace(Array<T> &in);
+}  // namespace cuda
+}  // namespace arrayfire

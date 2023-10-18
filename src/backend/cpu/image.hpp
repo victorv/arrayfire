@@ -7,15 +7,14 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
 #include <Array.hpp>
-#include <graphics_common.hpp>
+#include <common/graphics_common.hpp>
 
-namespace cpu
-{
-    template<typename T>
-    void copy_image(const Array<T> &in, const forge::Image* image);
-}
+namespace arrayfire {
+namespace cpu {
 
-#endif
+template<typename T>
+void copy_image(const Array<T> &in, fg_image image);
+
+}  // namespace cpu
+}  // namespace arrayfire

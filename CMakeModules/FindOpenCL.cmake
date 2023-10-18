@@ -1,68 +1,43 @@
-#.rst:
-# FindOpenCL
-# ----------
-#
-# Try to find OpenCL
-#
-# Once done this will define::
-#
-#   OpenCL_FOUND          - True if OpenCL was found
-#   OpenCL_INCLUDE_DIRS   - include directories for OpenCL
-#   OpenCL_LIBRARIES      - link against this library to use OpenCL
-#   OpenCL_VERSION_STRING - Highest supported OpenCL version (eg. 1.2)
-#   OpenCL_VERSION_MAJOR  - The major version of the OpenCL implementation
-#   OpenCL_VERSION_MINOR  - The minor version of the OpenCL implementation
-#
-# The module will also define two cache variables::
-#
-#   OpenCL_INCLUDE_DIR    - the OpenCL include directory
-#   OpenCL_LIBRARY        - the path to the OpenCL library
-#
+# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
+# file Copyright.txt or https://cmake.org/licensing for details.
 
-#=============================================================================
-# From CMake 3.2
-# Copyright 2014 Matthaeus G. Chajdas
-#
-# Distributed under the OSI-approved BSD License (the "License");
-# see accompanying file Copyright.txt for details.
-#
-# This software is distributed WITHOUT ANY WARRANTY; without even the
-# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-# See the License for more information.
+#[=======================================================================[.rst:
+FindOpenCL
+----------
 
-# CMake - Cross Platform Makefile Generator
-# Copyright 2000-2014 Kitware, Inc.
-# Copyright 2000-2011 Insight Software Consortium
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-# * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#
-# * Redistributions in binary form must reproduce the above copyright
-# notice, this list of conditions and the following disclaimer in the
-# documentation and/or other materials provided with the distribution.
-#
-# * Neither the names of Kitware, Inc., the Insight Software Consortium,
-# nor the names of their contributors may be used to endorse or promote
-# products derived from this software without specific prior written
-# permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#=============================================================================
+.. versionadded:: 3.1
+
+Finds Open Computing Language (OpenCL)
+
+.. versionadded:: 3.10
+  Detection of OpenCL 2.1 and 2.2.
+
+IMPORTED Targets
+^^^^^^^^^^^^^^^^
+
+.. versionadded:: 3.7
+
+This module defines :prop_tgt:`IMPORTED` target ``OpenCL::OpenCL``, if
+OpenCL has been found.
+
+Result Variables
+^^^^^^^^^^^^^^^^
+
+This module defines the following variables::
+
+  OpenCL_FOUND          - True if OpenCL was found
+  OpenCL_INCLUDE_DIRS   - include directories for OpenCL
+  OpenCL_LIBRARIES      - link against this library to use OpenCL
+  OpenCL_VERSION_STRING - Highest supported OpenCL version (eg. 1.2)
+  OpenCL_VERSION_MAJOR  - The major version of the OpenCL implementation
+  OpenCL_VERSION_MINOR  - The minor version of the OpenCL implementation
+
+The module will also define two cache variables::
+
+  OpenCL_INCLUDE_DIR    - the OpenCL include directory
+  OpenCL_LIBRARY        - the path to the OpenCL library
+
+#]=======================================================================]
 
 function(_FIND_OPENCL_VERSION)
   include(CheckSymbolExists)
@@ -70,12 +45,13 @@ function(_FIND_OPENCL_VERSION)
   set(CMAKE_REQUIRED_QUIET ${OpenCL_FIND_QUIETLY})
 
   CMAKE_PUSH_CHECK_STATE()
-  foreach(VERSION "2_0" "1_2" "1_1" "1_0")
+  foreach(VERSION "3_0" "2_2" "2_1" "2_0" "1_2" "1_1" "1_0")
     set(CMAKE_REQUIRED_INCLUDES "${OpenCL_INCLUDE_DIR}")
+
     if(APPLE)
       CHECK_SYMBOL_EXISTS(
         CL_VERSION_${VERSION}
-        "${OpenCL_INCLUDE_DIR}/OpenCL/cl.h"
+        "${OpenCL_INCLUDE_DIR}/Headers/cl.h"
         OPENCL_VERSION_${VERSION})
     else()
       CHECK_SYMBOL_EXISTS(
@@ -103,11 +79,14 @@ find_path(OpenCL_INCLUDE_DIR
     CL/cl.h OpenCL/cl.h
   PATHS
     ENV "PROGRAMFILES(X86)"
-    ENV NVSDKCOMPUTE_ROOT
-    ENV CUDA_PATH
     ENV AMDAPPSDKROOT
     ENV INTELOCLSDKROOT
+    ENV NVSDKCOMPUTE_ROOT
+    ENV CUDA_PATH
     ENV ATISTREAMSDKROOT
+    ENV OCL_ROOT
+    /usr/local/cuda
+    /opt/cuda
   PATH_SUFFIXES
     include
     OpenCL/common/inc
@@ -121,11 +100,12 @@ if(WIN32)
       NAMES OpenCL
       PATHS
         ENV "PROGRAMFILES(X86)"
-        ENV CUDA_PATH
-        ENV NVSDKCOMPUTE_ROOT
         ENV AMDAPPSDKROOT
         ENV INTELOCLSDKROOT
+        ENV CUDA_PATH
+        ENV NVSDKCOMPUTE_ROOT
         ENV ATISTREAMSDKROOT
+        ENV OCL_ROOT
       PATH_SUFFIXES
         "AMD APP/lib/x86"
         lib/x86
@@ -136,11 +116,12 @@ if(WIN32)
       NAMES OpenCL
       PATHS
         ENV "PROGRAMFILES(X86)"
-        ENV CUDA_PATH
-        ENV NVSDKCOMPUTE_ROOT
         ENV AMDAPPSDKROOT
         ENV INTELOCLSDKROOT
+        ENV CUDA_PATH
+        ENV NVSDKCOMPUTE_ROOT
         ENV ATISTREAMSDKROOT
+        ENV OCL_ROOT
       PATH_SUFFIXES
         "AMD APP/lib/x86_64"
         lib/x86_64
@@ -148,36 +129,37 @@ if(WIN32)
         OpenCL/common/lib/x64)
   endif()
 else()
-  find_library(OpenCL_LIBRARY
-    NAMES OpenCL
-    PATHS
-        ENV LD_LIBRARY_PATH
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    find_library(OpenCL_LIBRARY
+      NAMES OpenCL
+      PATHS
         ENV AMDAPPSDKROOT
-        ENV INTELOCLSDKROOT
         ENV CUDA_PATH
-        ENV NVSDKCOMPUTE_ROOT
-        ENV ATISTREAMSDKROOT
-        /usr/lib64
-        /usr/lib
-        /usr/local/lib64
-        /usr/local/lib
-        /sw/lib
-        /opt/local/lib
-    PATH_SUFFIXES
-        "AMD APP/lib/x86_64"
+        /usr/local/cuda
+        /opt/cuda
+      PATH_SUFFIXES
+        lib/x86
+        lib)
+  elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    find_library(OpenCL_LIBRARY
+      NAMES OpenCL
+      PATHS
+        ENV AMDAPPSDKROOT
+        ENV CUDA_PATH
+        /usr/local/cuda
+        /opt/cuda
+      PATH_SUFFIXES
         lib/x86_64
         lib/x64
-        lib/
-        lib64/
-        x86_64-linux-gnu
-        arm-linux-gnueabihf
-    )
+        lib
+        lib64)
+  endif()
 endif()
 
 set(OpenCL_LIBRARIES ${OpenCL_LIBRARY})
 set(OpenCL_INCLUDE_DIRS ${OpenCL_INCLUDE_DIR})
 
-#include(${CMAKE_CURRENT_LIST_DIR}/FindPackageHandleStandardArgs.cmake)
+include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
   OpenCL
   FOUND_VAR OpenCL_FOUND
@@ -188,3 +170,16 @@ mark_as_advanced(
   OpenCL_INCLUDE_DIR
   OpenCL_LIBRARY)
 
+if(OpenCL_FOUND AND NOT TARGET OpenCL::OpenCL)
+  if(OpenCL_LIBRARY MATCHES "/([^/]+)\\.framework$")
+    add_library(OpenCL::OpenCL INTERFACE IMPORTED)
+    set_target_properties(OpenCL::OpenCL PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${OpenCL_LIBRARY}")
+  else()
+    add_library(OpenCL::OpenCL UNKNOWN IMPORTED)
+    set_target_properties(OpenCL::OpenCL PROPERTIES
+      IMPORTED_LOCATION "${OpenCL_LIBRARY}")
+  endif()
+  set_target_properties(OpenCL::OpenCL PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${OpenCL_INCLUDE_DIRS}")
+endif()

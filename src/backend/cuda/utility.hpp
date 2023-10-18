@@ -8,22 +8,27 @@
  ********************************************************/
 
 #pragma once
+
+#include <backend.hpp>
 #include <af/defines.h>
-#include "backend.hpp"
 
-namespace cuda
-{
+namespace arrayfire {
+namespace cuda {
 
-static __DH__ dim_t trimIndex(const int &idx, const dim_t &len)
-{
+[[gnu::unused]] static __DH__ dim_t trimIndex(const int &idx,
+                                              const dim_t &len) {
     int ret_val = idx;
-    int offset  = abs(ret_val)%len;
-    if (ret_val<0) {
-        ret_val = offset-1;
-    } else if (ret_val>=len) {
-        ret_val = len-offset-1;
+    if (ret_val < 0) {
+        int offset = (abs(ret_val) - 1) % len;
+        ret_val    = offset;
+    } else if (ret_val >= len) {
+        int offset = abs(ret_val) % len;
+        ret_val    = len - offset - 1;
     }
     return ret_val;
 }
 
-}
+int interpOrder(const af_interp_type p) noexcept;
+
+}  // namespace cuda
+}  // namespace arrayfire

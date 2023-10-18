@@ -8,16 +8,15 @@
  ********************************************************/
 
 #pragma once
-#include <traits.hpp>
-#include <dispatch.hpp>
-#include <Param.hpp>
-#include <debug_opencl.hpp>
 
-namespace opencl
-{
-namespace kernel
-{
-    template<typename Ti, typename Tk, typename To, af_op_t op, bool inclusive_scan>
-    void scan_first(Param &out, const Param &in, const Param &key);
+#include <Param.hpp>
+
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
+template<typename Ti, typename Tk, typename To, af_op_t op>
+void scanFirstByKey(Param &out, const Param &in, const Param &key,
+                    const bool inclusive_scan);
 }
-}
+}  // namespace opencl
+}  // namespace arrayfire

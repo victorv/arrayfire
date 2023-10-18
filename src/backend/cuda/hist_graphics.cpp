@@ -7,54 +7,62 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#if defined (WITH_GRAPHICS)
-
-#include <interopManager.hpp>
 #include <Array.hpp>
-#include <hist_graphics.hpp>
-#include <err_cuda.hpp>
+#include <GraphicsResourceManager.hpp>
 #include <debug_cuda.hpp>
+#include <device_manager.hpp>
+#include <err_cuda.hpp>
+#include <hist_graphics.hpp>
 
-namespace cuda
-{
-using namespace gl;
+using arrayfire::common::ForgeManager;
+using arrayfire::common::ForgeModule;
+using arrayfire::common::forgePlugin;
+
+namespace arrayfire {
+namespace cuda {
 
 template<typename T>
-void copy_histogram(const Array<T> &data, const forge::Histogram* hist)
-{
-    if(InteropManager::checkGraphicsInteropCapability()) {
+void copy_histogram(const Array<T> &data, fg_histogram hist) {
+    auto stream = getActiveStream();
+    if (DeviceManager::checkGraphicsInteropCapability()) {
         const T *d_P = data.get();
 
-        InteropManager& intrpMngr = InteropManager::getInstance();
+        auto res = interopManager().getHistogramResources(hist);
 
-        cudaGraphicsResource_t *resources = intrpMngr.getBufferResource(hist);
-        // Map resource. Copy data to VBO. Unmap resource.
-        size_t num_bytes = hist->verticesSize();
-        T* d_vbo = NULL;
-        cudaGraphicsMapResources(1, resources, cuda::getStream(cuda::getActiveDeviceId()));
-        cudaGraphicsResourceGetMappedPointer((void **)&d_vbo, &num_bytes, resources[0]);
-        cudaMemcpyAsync(d_vbo, d_P, num_bytes, cudaMemcpyDeviceToDevice,
-                        cuda::getStream(cuda::getActiveDeviceId()));
-        cudaGraphicsUnmapResources(1, resources, cuda::getStream(cuda::getActiveDeviceId()));
+        size_t bytes = 0;
+        T *d_vbo     = NULL;
+        cudaGraphicsMapResources(1, res[0].get(), stream);
+        cudaGraphicsResourceGetMappedPointer((void **)&d_vbo, &bytes,
+                                             *(res[0].get()));
+        cudaMemcpyAsync(d_vbo, d_P, bytes, cudaMemcpyDeviceToDevice, stream);
+        cudaGraphicsUnmapResources(1, res[0].get(), stream);
 
         CheckGL("After cuda resource copy");
 
         POST_LAUNCH_CHECK();
     } else {
+        ForgeModule &_ = common::forgePlugin();
+        unsigned bytes = 0, buffer = 0;
+        FG_CHECK(_.fg_get_histogram_vertex_buffer(&buffer, hist));
+        FG_CHECK(_.fg_get_histogram_vertex_buffer_size(&bytes, hist));
+
         CheckGL("Begin CUDA fallback-resource copy");
-        glBindBuffer((gl::GLenum)GL_ARRAY_BUFFER, hist->vertices());
-        gl::GLubyte* ptr = (gl::GLubyte*)glMapBuffer((gl::GLenum)GL_ARRAY_BUFFER, (gl::GLenum)GL_WRITE_ONLY);
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+        auto *ptr =
+            static_cast<GLubyte *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
         if (ptr) {
-            CUDA_CHECK(cudaMemcpy(ptr, data.get(), hist->verticesSize(), cudaMemcpyDeviceToHost));
-            glUnmapBuffer((gl::GLenum)GL_ARRAY_BUFFER);
+            CUDA_CHECK(cudaMemcpyAsync(ptr, data.get(), bytes,
+                                       cudaMemcpyDeviceToHost, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
+            glUnmapBuffer(GL_ARRAY_BUFFER);
         }
-        glBindBuffer((gl::GLenum)GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
         CheckGL("End CUDA fallback-resource copy");
     }
 }
 
-#define INSTANTIATE(T)  \
-    template void copy_histogram<T>(const Array<T> &data, const forge::Histogram* hist);
+#define INSTANTIATE(T) \
+    template void copy_histogram<T>(const Array<T> &, fg_histogram);
 
 INSTANTIATE(float)
 INSTANTIATE(int)
@@ -63,6 +71,5 @@ INSTANTIATE(short)
 INSTANTIATE(ushort)
 INSTANTIATE(uchar)
 
-}
-
-#endif  // WITH_GRAPHICS
+}  // namespace cuda
+}  // namespace arrayfire

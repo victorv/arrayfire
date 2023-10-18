@@ -1,28 +1,42 @@
-INCLUDE(ExternalProject)
+# Copyright (c) 2021, ArrayFire
+# All rights reserved.
+#
+# This file is distributed under 3-clause BSD license.
+# The complete license agreement can be obtained at:
+# http://arrayfire.com/licenses/BSD-3-Clause
 
-SET(prefix ${PROJECT_BINARY_DIR}/third_party/cl2hpp)
+# Check if cl2.hpp exsists and if not download it from khronos GitHub repo
+#
+# NOTE: This file does not use ExternalProject_Add because that command was
+#       was not able to download files that are not archives before CMake
+#       version 3.6
 
-ExternalProject_Add(
-    cl2hpp-ext
-    GIT_REPOSITORY https://github.com/KhronosGroup/OpenCL-CLHPP.git
-    GIT_TAG 75bb7d0d8b2ffc6aac0a3dcaa22f6622cab81f7c
-    PREFIX "${prefix}"
-    INSTALL_DIR "${prefix}/package"
-    UPDATE_COMMAND ""
-    CONFIGURE_COMMAND ${CMAKE_COMMAND} -Wno-dev "-G${CMAKE_GENERATOR}" <SOURCE_DIR>
-    -DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
-    -DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
-    -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
-    -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-    -DBUILD_DOCS:BOOL=OFF
-    -DBUILD_EXAMPLES:BOOL=OFF
-    -DBUILD_TESTS:BOOL=OFF
-    )
+find_package(OpenCL)
 
-ExternalProject_Get_Property(cl2hpp-ext install_dir)
+if(NOT TARGET OpenCL::cl2hpp)
+  find_path(cl2hpp_header_file_path
+    NAMES CL/cl2.hpp
+    PATHS ${OpenCL_INCLUDE_PATHS})
 
-ADD_CUSTOM_TARGET(cl2hpp DEPENDS "${prefix}/package/CL/cl2.hpp")
+  if(cl2hpp_header_file_path)
+    add_library(cl2hpp IMPORTED INTERFACE GLOBAL)
+    add_library(OpenCL::cl2hpp IMPORTED INTERFACE GLOBAL)
 
-ADD_DEPENDENCIES(cl2hpp cl2hpp-ext)
+    set_target_properties(cl2hpp OpenCL::cl2hpp PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES ${cl2hpp_header_file_path})
+  elseif (NOT TARGET OpenCL::cl2hpp OR NOT TARGET cl2hpp)
+    af_dep_check_and_populate(${cl2hpp_prefix}
+      URI https://github.com/KhronosGroup/OpenCL-CLHPP.git
+      REF v2022.09.30)
 
-SET(CL2HPP_INCLUDE_DIRECTORY ${install_dir})
+    find_path(cl2hpp_var
+      NAMES CL/cl2.hpp
+      PATHS ${ArrayFire_BINARY_DIR}/extern/${cl2hpp_prefix}-src/include)
+
+    add_library(cl2hpp IMPORTED INTERFACE GLOBAL)
+    add_library(OpenCL::cl2hpp IMPORTED INTERFACE GLOBAL)
+
+    set_target_properties(cl2hpp OpenCL::cl2hpp PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES ${cl2hpp_var})
+  endif()
+endif()

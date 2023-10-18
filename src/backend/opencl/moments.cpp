@@ -8,22 +8,21 @@
  ********************************************************/
 
 #include <Array.hpp>
-#include <kernel/moments.hpp>
-#include <err_opencl.hpp>
 #include <debug_opencl.hpp>
+#include <err_opencl.hpp>
+#include <kernel/moments.hpp>
 
-namespace opencl
-{
+namespace arrayfire {
+namespace opencl {
 
-static inline int bitCount(int v) {
-    v = v - ((v >> 1) & 0x55555555);
-    v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
-    return (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
+static inline unsigned bitCount(unsigned v) {
+    v = v - ((v >> 1U) & 0x55555555U);
+    v = (v & 0x33333333U) + ((v >> 2U) & 0x33333333U);
+    return (((v + (v >> 4U)) & 0xF0F0F0FU) * 0x1010101U) >> 24U;
 }
 
 template<typename T>
-Array<float> moments(const Array<T> &in, const af_moment_type moment)
-{
+Array<float> moments(const Array<T> &in, const af_moment_type moment) {
     in.eval();
     dim4 odims, idims = in.dims();
     dim_t moments_dim = bitCount(moment);
@@ -40,8 +39,9 @@ Array<float> moments(const Array<T> &in, const af_moment_type moment)
     return out;
 }
 
-#define INSTANTIATE(T)                                                              \
-    template Array<float> moments<T>(const Array<T> &in, const af_moment_type moment);
+#define INSTANTIATE(T)                                   \
+    template Array<float> moments<T>(const Array<T> &in, \
+                                     const af_moment_type moment);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -52,4 +52,5 @@ INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
 
-}
+}  // namespace opencl
+}  // namespace arrayfire

@@ -8,76 +8,48 @@
  ********************************************************/
 
 #pragma once
-#include <kernel_headers/range.hpp>
-#include <program.hpp>
-#include <traits.hpp>
-#include <string>
-#include <mutex>
-#include <map>
-#include <dispatch.hpp>
+
 #include <Param.hpp>
+#include <common/dispatch.hpp>
+#include <common/half.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel_headers/range.hpp>
+#include <traits.hpp>
 
-using cl::Buffer;
-using cl::Program;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::EnqueueArgs;
-using cl::NDRange;
-using std::string;
+#include <string>
+#include <vector>
 
-namespace opencl
-{
-    namespace kernel
-    {
-        // Kernel Launch Config Values
-        static const int RANGE_TX = 32;
-        static const int RANGE_TY = 8;
-        static const int RANGE_TILEX = 512;
-        static const int RANGE_TILEY = 32;
+namespace arrayfire {
+namespace opencl {
+namespace kernel {
 
-        template<typename T>
-        void range(Param out, const int dim)
-        {
-            try {
-                static std::once_flag compileFlags[DeviceManager::MAX_DEVICES];
-                static std::map<int, Program*>  rangeProgs;
-                static std::map<int, Kernel*> rangeKernels;
+template<typename T>
+void range(Param out, const int dim) {
+    constexpr int RANGE_TX    = 32;
+    constexpr int RANGE_TY    = 8;
+    constexpr int RANGE_TILEX = 512;
+    constexpr int RANGE_TILEY = 32;
 
-                int device = getActiveDeviceId();
+    std::array<TemplateArg, 1> targs   = {TemplateTypename<T>()};
+    std::array<std::string, 2> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        getTypeBuildDefinition<T>()};
 
-                std::call_once( compileFlags[device], [device] () {
-                    std::ostringstream options;
-                    options << " -D T=" << dtype_traits<T>::getName();
-                    if (std::is_same<T, double>::value ||
-                        std::is_same<T, cdouble>::value) {
-                        options << " -D USE_DOUBLE";
-                    }
-                    Program prog;
-                    buildProgram(prog, range_cl, range_cl_len, options.str());
-                    rangeProgs[device]   = new Program(prog);
-                    rangeKernels[device] = new Kernel(*rangeProgs[device], "range_kernel");
-                });
+    auto rangeOp =
+        common::getKernel("range_kernel", {{range_cl_src}}, targs, options);
 
-                auto rangeOp = KernelFunctor<Buffer, const KParam, const int,
-                                           const int, const int> (*rangeKernels[device]);
+    cl::NDRange local(RANGE_TX, RANGE_TY, 1);
 
-                NDRange local(RANGE_TX, RANGE_TY, 1);
+    int blocksPerMatX = divup(out.info.dims[0], RANGE_TILEX);
+    int blocksPerMatY = divup(out.info.dims[1], RANGE_TILEY);
+    cl::NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
+                       local[1] * blocksPerMatY * out.info.dims[3], 1);
 
-                int blocksPerMatX = divup(out.info.dims[0], RANGE_TILEX);
-                int blocksPerMatY = divup(out.info.dims[1], RANGE_TILEY);
-                NDRange global(local[0] * blocksPerMatX * out.info.dims[2],
-                               local[1] * blocksPerMatY * out.info.dims[3],
-                               1);
-
-                rangeOp(EnqueueArgs(getQueue(), global, local),
-                       *out.data, out.info, dim, blocksPerMatX, blocksPerMatY);
-
-                CL_DEBUG_FINISH(getQueue());
-            } catch (cl::Error err) {
-                CL_TO_AF_ERROR(err);
-                throw;
-            }
-        }
-    }
+    rangeOp(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+            dim, blocksPerMatX, blocksPerMatY);
+    CL_DEBUG_FINISH(getQueue());
 }
+}  // namespace kernel
+}  // namespace opencl
+}  // namespace arrayfire
